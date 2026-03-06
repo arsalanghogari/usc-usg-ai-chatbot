@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>USG Chat — Test</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 20px; }
+    #messages { border: 1px solid #ddd; padding: 12px; height: 60vh; overflow:auto; }
+    .msg { margin-bottom: 12px; }
+    .user { text-align:right; color:#03396c; }
+    .bot { text-align:left; color:#111; }
+    .source { font-size:12px; color:#0073e6; margin-top:4px; }
+    .source-section { margin-top: 8px; font-weight: 600; }
+    .source a { color: #0073e6; text-decoration: none; }
+    .source a:hover { text-decoration: underline; }
+    #inputRow { margin-top: 10px; display:flex; gap:8px; }
+    #q { flex:1; padding:8px; }
+  </style>
+</head>
+<body>
+  <h2>USG Chat — Test</h2>
+  <div id="messages"></div>
+  <div id="inputRow">
+    <input id="q" placeholder="Ask a question..." />
+    <button id="send">Send</button>
+  </div>
+<script>
+const API = "http://localhost:3001/chat"; // change to deployed backend URL when deployed
+const messages = document.getElementById('messages');
+const q = document.getElementById('q');
+const send = document.getElementById('send');
+
+function append(html) {
+  const d = document.createElement('div');
+  d.className = 'msg';
+  d.innerHTML = html;
+  messages.appendChild(d);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+send.onclick = async () => {
+  const text = q.value.trim(); if (!text) return;
+  append(`<div class="user">${escapeHtml(text)}</div>`);
+  q.value='';
+  const thinking = document.createElement('div'); thinking.className = 'msg'; thinking.textContent = '...thinking...'; messages.appendChild(thinking);
+  try {
+    const r = await fetch(API, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ message: text })
+    });
+    const js = await r.json();
+    thinking.remove();
+
+    // 1) Clean the assistant answer: remove inline [source:TITLE | URL] markers
+    const rawAnswer = js && js.answer ? js.answer : '';
+    const cleaned = rawAnswer.replace(/\[source:(.*?)\|(.*?)\]/g, '').trim();
+
+    // 2) Render the cleaned answer (escape HTML, then convert newlines)
+    append(`<div class="bot">${escapeHtml(cleaned).replace(/\n/g,'<br>')}</div>`);
+
+    // 3) Render sources section using your exact rendering style
+    if (js && Array.isArray(js.sources) && js.sources.length > 0) {
+      append(`<div class="source-section">Sources:</div>`);
+      js.sources.forEach(s => {
+        // use escapeHtml for title and URL inside attributes/text
+        const safeUrl = escapeHtml(s.url || '');
+        const safeTitle = escapeHtml(s.title || s.url || '');
+        append(`<div class="source">Source: <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeTitle}</a></div>`);
+      });
+    }
+
+  } catch(e){
+    thinking.remove();
+    append(`<div class="bot">Error contacting backend</div>`);
+    console.error('Chat error', e);
+  }
+};
+
+function escapeHtml(s){
+  if (!s) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>
