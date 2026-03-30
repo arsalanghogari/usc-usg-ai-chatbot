@@ -21,12 +21,7 @@ if (!OPENAI_API_KEY) {
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 const KB_PATH = path.join(__dirname, "kb.json");
 
-app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "https://arsalanghogari.github.io/"
-  ]
-}));
+app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 
