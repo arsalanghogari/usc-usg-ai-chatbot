@@ -24,7 +24,7 @@ const KB_PATH = path.join(__dirname, "kb.json");
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "https://yourusername.github.io"
+    "https://arsalanghogari.github.io/"
   ]
 }));
 app.use(express.json());
