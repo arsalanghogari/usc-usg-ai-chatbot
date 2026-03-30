@@ -1,85 +1,536 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>USG Chat — Test</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />  <!-- Mobile-friendly meta tag -->
+  <title>USG Chat</title>
   <style>
-    body { font-family: system-ui, Arial; margin: 20px; }
-    #messages { border: 1px solid #ddd; padding: 12px; height: 60vh; overflow:auto; }
-    .msg { margin-bottom: 12px; }
-    .user { text-align:right; color:#03396c; }
-    .bot { text-align:left; color:#111; }
-    .source { font-size:12px; color:#0073e6; margin-top:4px; }
-    .source-section { margin-top: 8px; font-weight: 600; }
-    .source a { color: #0073e6; text-decoration: none; }
-    .source a:hover { text-decoration: underline; }
-    #inputRow { margin-top: 10px; display:flex; gap:8px; }
-    #q { flex:1; padding:8px; }
-  </style>
-</head>
-<body>
-  <h2>USG Chat — Test</h2>
-  <div id="messages"></div>
-  <div id="inputRow">
-    <input id="q" placeholder="Ask a question..." />
-    <button id="send">Send</button>
-  </div>
-<script>
-const API = "http://localhost:3001/chat"; // change to deployed backend URL when deployed
-const messages = document.getElementById('messages');
-const q = document.getElementById('q');
-const send = document.getElementById('send');
-
-function append(html) {
-  const d = document.createElement('div');
-  d.className = 'msg';
-  d.innerHTML = html;
-  messages.appendChild(d);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-send.onclick = async () => {
-  const text = q.value.trim(); if (!text) return;
-  append(`<div class="user">${escapeHtml(text)}</div>`);
-  q.value='';
-  const thinking = document.createElement('div'); thinking.className = 'msg'; thinking.textContent = '...thinking...'; messages.appendChild(thinking);
-  try {
-    const r = await fetch(API, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text })
-    });
-    const js = await r.json();
-    thinking.remove();
-
-    // 1) Clean the assistant answer: remove inline [source:TITLE | URL] markers
-    const rawAnswer = js && js.answer ? js.answer : '';
-    const cleaned = rawAnswer.replace(/\[source:(.*?)\|(.*?)\]/g, '').trim();
-
-    // 2) Render the cleaned answer (escape HTML, then convert newlines)
-    append(`<div class="bot">${escapeHtml(cleaned).replace(/\n/g,'<br>')}</div>`);
-
-    // 3) Render sources section using your exact rendering style
-    if (js && Array.isArray(js.sources) && js.sources.length > 0) {
-      append(`<div class="source-section">Sources:</div>`);
-      js.sources.forEach(s => {
-        // use escapeHtml for title and URL inside attributes/text
-        const safeUrl = escapeHtml(s.url || '');
-        const safeTitle = escapeHtml(s.title || s.url || '');
-        append(`<div class="source">Source: <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeTitle}</a></div>`);
-      });
+    /* Reusable theme values with var(--name) */
+    :root {
+      --bg: #ffffff;
+      --panel: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --user: #0f172a;
+      --bot: #111827;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
     }
 
-  } catch(e){
-    thinking.remove();
-    append(`<div class="bot">Error contacting backend</div>`);
-    console.error('Chat error', e);
-  }
-};
+    /* Global layout rules */
 
-function escapeHtml(s){
-  if (!s) return '';
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-</script>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      min-height: 100vh;
+    }
+
+    /* Markdown-style message formatting helpers */
+
+    .bubble p {
+      margin: 0 0 0.5em;
+    }
+
+    .bubble p:first-child {
+      margin-top: 0;
+    }
+
+    .bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    .bubble ul,
+    .bubble ol {
+      margin: 0.35em 0;
+      padding-left: 1.25em;
+    }
+
+    .bubble li {
+      margin: 0.15em 0;
+    }
+
+    .bubble h1,
+    .bubble h2,
+    .bubble h3,
+    .bubble h4,
+    .bubble h5,
+    .bubble h6 {
+      margin: 0.5em 0 0.25em;
+    }
+
+    /* Floating launcher button */
+    .chat-launcher {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      width: 64px;
+      height: 64px;
+      border: none;
+      border-radius: 50%;
+      background: none;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 12px 30px rgba(37, 99, 235, 0.35);
+      z-index: 1000;
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .chat-launcher:hover {
+      transform: translateY(-2px) scale(1.03);
+      box-shadow: 0 16px 36px rgba(37, 99, 235, 0.42);
+    }
+
+    .chat-launcher:active {
+      transform: scale(0.98);
+    }
+
+    .chat-launcher span {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    /* Overlay backdrop */
+    .chat-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.35);
+      backdrop-filter: blur(3px);
+      display: none;
+      align-items: flex-end;
+      justify-content: flex-end;
+      padding: 24px;
+      z-index: 999;
+    }
+
+    .chat-backdrop.open {
+      display: flex;
+    }
+
+    /* Chat panel */
+    .chat-panel {
+      width: min(420px, calc(100vw - 32px));
+      height: min(680px, calc(100vh - 64px));
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-header {
+      padding: 16px 16px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: linear-gradient(180deg, #f8fafc, #ffffff);
+    }
+
+    .chat-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .mini-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .chat-title-wrap {
+      min-width: 0;
+    }
+
+    .chat-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .chat-subtitle {
+      margin: 2px 0 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .chat-close {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 28px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 4px;
+      flex-shrink: 0;
+    }
+
+    .chat-close:hover {
+      color: var(--text);
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .msg {
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .bubble {
+      max-width: 90%;
+      padding: 12px 14px;
+      border-radius: 18px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .user {
+      align-items: flex-end;
+    }
+
+    .user .bubble {
+      background: #e0efff;
+      color: var(--user);
+      border-bottom-right-radius: 6px;
+    }
+
+    .bot {
+      align-items: flex-start;
+    }
+
+    .bot .bubble {
+      background: #f3f4f6;
+      color: var(--bot);
+      border-bottom-left-radius: 6px;
+    }
+
+    .sources {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .sources-label {
+      margin-top: 6px;
+      font-weight: 700;
+      color: #374151;
+      font-size: 12px;
+    }
+
+    .source-link {
+      display: block;
+      margin-top: 5px;
+      color: #2563eb;
+      text-decoration: none;
+      word-break: break-word;
+    }
+
+    .source-link:hover {
+      text-decoration: underline;
+    }
+
+    .composer {
+      border-top: 1px solid var(--border);
+      padding: 12px;
+      background: #fafafa;
+    }
+
+    .composer-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .composer input {
+      flex: 1;
+      padding: 12px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 14px;
+      font-size: 14px;
+      outline: none;
+      background: white;
+    }
+
+    .composer input:focus {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    }
+
+    .composer button {
+      border: none;
+      background: var(--accent);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .composer button:hover {
+      background: var(--accent-hover);
+    }
+
+    .composer button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      min-height: 16px;
+    }
+
+    .typing {
+      font-style: italic;
+      color: var(--muted);
+    }
+
+    @media (max-width: 640px) {
+      .chat-backdrop {
+        padding: 12px;
+      }
+
+      .chat-panel {
+        width: 100%;
+        height: min(84vh, 720px);
+        border-radius: 20px;
+      }
+
+      .chat-launcher {
+        right: 16px;
+        bottom: 16px;
+        width: 58px;
+        height: 58px;
+      }
+    }
+
+    .avatar-wrap {
+      width: 180px;
+      height: 180px;
+      overflow: hidden;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+
+      filter: contrast(1.15) saturate(1.25) brightness(1.05);
+      transform: scale(1.08);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>   
+</head>
+<body>
+  <button class="chat-launcher" id="launcher" aria-label="Open USG chat">
+    <div class="avatar-wrap">
+      <img src="tommy.png" alt="Chat avatar" class="avatar-img" />
+    </div>
+  </button>
+
+  <div class="chat-backdrop" id="backdrop" aria-hidden="true">
+    <div class="chat-panel" role="dialog" aria-modal="true" aria-labelledby="chatTitle">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <div class="avatar-wrap">
+            <img src="tommy.png" alt="Chat avatar" class="avatar-img" />
+          </div>
+          <div class="chat-title-wrap">
+            <h1 class="chat-title" id="chatTitle">USG Chat</h1>
+            <p class="chat-subtitle">Ask about approved USG pages</p>
+          </div>
+        </div>
+        <button class="chat-close" id="closeBtn" aria-label="Close chat">&times;</button>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="composer">
+        <div class="composer-row">
+          <input id="q" placeholder="Ask a question..." autocomplete="off" />
+          <button id="send">Send</button>
+        </div>
+        <div class="status" id="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = "https://usg-chat-backend.onrender.com/api/chat";
+    const launcher = document.getElementById("launcher");
+    const backdrop = document.getElementById("backdrop");
+    const closeBtn = document.getElementById("closeBtn");
+    const messages = document.getElementById("messages");
+    const q = document.getElementById("q");
+    const send = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+
+    /*function escapeHtml(s) {
+      if (!s) return "";
+      return String(s).replace(/[&<>"']/g, c => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[c]));
+    }*/
+
+    function appendMessage(type, text, sources = []) {
+      const wrap = document.createElement("div");
+      wrap.className = `msg ${type}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.innerHTML = DOMPurify.sanitize(marked.parse(text));
+      wrap.appendChild(bubble);
+
+      if (Array.isArray(sources) && sources.length) {
+        const sourcesDiv = document.createElement("div");
+        sourcesDiv.className = "sources";
+        sourcesDiv.innerHTML = `<div class="sources-label">Sources:</div>`;
+
+        sources.forEach((s) => {
+          const a = document.createElement("a");
+          a.className = "source-link";
+          a.href = s.source_url || "#";
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = s.source_title || s.source_url || "Source";
+          sourcesDiv.appendChild(a);
+        });
+
+        wrap.appendChild(sourcesDiv);
+      }
+
+      messages.appendChild(wrap);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function openChat() {
+      backdrop.classList.add("open");
+      launcher.style.display = "none";
+      q.focus();
+    }
+
+    function closeChat() {
+      backdrop.classList.remove("open");
+      launcher.style.display = "flex";
+    }
+
+    launcher.addEventListener("click", openChat);
+    closeBtn.addEventListener("click", closeChat);
+
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) closeChat();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeChat();
+    });
+
+    async function sendMessage() {
+      const text = q.value.trim();
+      if (!text) return;
+
+      appendMessage("user", text);
+      q.value = "";
+      send.disabled = true;
+      statusEl.textContent = "Thinking...";
+
+      const thinking = document.createElement("div");
+      thinking.className = "msg bot";
+      thinking.innerHTML = `<div class="bubble typing">...</div>`;
+      messages.appendChild(thinking);
+      messages.scrollTop = messages.scrollHeight;
+
+      try {
+        const r = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text })
+        });
+
+        const js = await r.json();
+        thinking.remove();
+
+        if (!r.ok) {
+          throw new Error(js.error || "Request failed");
+        }
+
+        const rawAnswer = js && js.answer ? js.answer : "";
+        const cleaned = rawAnswer.replace(/\[source:(.*?)\|(.*?)\]/g, "").trim();
+
+        const uniqueSourcesMap = new Map();
+        (Array.isArray(js.sources) ? js.sources : []).forEach((s) => {
+          const key = s.source_url || s.source_title || Math.random().toString(36);
+          if (!uniqueSourcesMap.has(key)) uniqueSourcesMap.set(key, s);
+        });
+        const uniqueSources = Array.from(uniqueSourcesMap.values());
+        
+        if (js.crisis) {
+          appendMessage("bot", cleaned || "Please call 988 right now or go to the nearest emergency help right away.", uniqueSources);
+          statusEl.textContent = "";
+          return;
+        }
+        appendMessage("bot", cleaned || "(No answer returned.)", uniqueSources);
+        statusEl.textContent = "";
+      } catch (e) {
+        thinking.remove();
+        appendMessage("bot", "Error contacting backend.");
+        statusEl.textContent = e.message || "Error";
+        console.error("Chat error", e);
+      } finally {
+        send.disabled = false;
+      }
+    }
+
+    send.addEventListener("click", sendMessage);
+
+    q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage();
+    });
+  </script>
 </body>
 </html>
