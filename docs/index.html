@@ -405,6 +405,7 @@
     const q = document.getElementById("q");
     const send = document.getElementById("send");
     const statusEl = document.getElementById("status");
+    const history = [];
 
     /*function escapeHtml(s) {
       if (!s) return "";
@@ -486,10 +487,15 @@
       messages.scrollTop = messages.scrollHeight;
 
       try {
+        history.push({
+          role: "user",
+          content: text
+        });
+        const recentHistory = history.slice(-8);
         const r = await fetch(API, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text })
+          body: JSON.stringify({ message: text, history: recentHistory })
         });
 
         const js = await r.json();
@@ -508,6 +514,11 @@
           if (!uniqueSourcesMap.has(key)) uniqueSourcesMap.set(key, s);
         });
         const uniqueSources = Array.from(uniqueSourcesMap.values());
+
+        history.push({
+          role: "assistant",
+          content: cleaned || ""
+        });
         
         if (js.crisis) {
           appendMessage("bot", cleaned || "Please call 988 right now or go to the nearest emergency help right away.", uniqueSources);

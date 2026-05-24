@@ -70,10 +70,13 @@ function topChunks(queryEmbedding, chunks, k = 4) {
 }
 
 const CRISIS_REPLIES = [
-  "I’m really sorry you’re going through this. Please call 988 right now or go to the nearest emergency room or emergency help right away. If you can, stay with someone you trust and let them know you need support.",
-  "Thank you for telling me. Please reach out to 988 immediately, or call emergency services if you are in immediate danger. Stay with a trusted person and do not stay alone right now.",
-  "This sounds urgent. Call 988 now or go to the closest emergency help right away. If possible, move away from anything you could use to hurt yourself and be with someone you trust.",
-  "I hear you. Please contact 988 right away, or go to the nearest emergency room or emergency services. Keep yourself with a trusted person while you get help.",
+  "I’m really sorry you’re hurting this much. Please call or text 988 right now and reach out to someone you trust to stay with you.",
+  
+  "You don’t have to carry this alone tonight. Please contact 988 now and tell a trusted person nearby how you’re feeling.",
+  
+  "I’m really glad you said something. Please call or text 988 right now and be with someone you trust if you can.",
+  
+  "I’m sorry you’re in this much pain. Please reach out to 988 now and let someone close to you know you need support.",
 ];
 
 const CRISIS_SOURCES = [
@@ -124,6 +127,24 @@ function hasDisallowedAssistantLanguage(text) {
   return badPatterns.some((re) => re.test(String(text || "")));
 }
 
+function historySuggestsCrisis(history) {
+  const combined = history
+    .map((m) => m?.content || "")
+    .join(" ")
+    .toLowerCase();
+
+  const patterns = [
+    /\bkill myself\b/i,
+    /\bwant to die\b/i,
+    /\bsuicid(e|al)\b/i,
+    /\bdon'?t want to live\b/i,
+    /\bno reason to live\b/i,
+    /\blife is pointless\b/i,
+  ];
+
+  return patterns.some((re) => re.test(combined));
+}
+
 async function isCrisisMessage(message) {
   if (hasCrisisKeywords(message)) return true;
 
@@ -149,35 +170,46 @@ async function isCrisisMessage(message) {
 }
 
 const CRISIS_INSTRUCTIONS = `
-You are in crisis-support mode.
+You are responding to a user who may be in emotional crisis or considering self-harm.
 
-The user may be at risk of self-harm or suicide. 
+Your tone should feel:
+- warm
+- calm
+- grounded
+- human
+- emotionally present
 
-For any message involving mental health concerns, emotional distress, self-harm, suicide, hopelessness, panic, abuse, or crisis:
+Do not sound robotic, clinical, overly formal, or like a policy document.
 
-- Respond with calm, compassionate, non-judgmental language.
-- Keep responses brief, supportive, and action-oriented.
-- Do not act like a therapist, counselor, or crisis substitute.
-- Do not encourage emotional dependency on the chatbot.
-- Do not say things like:
-  "I'm always here for you,"
-  "I can help you through this,"
-  or "You can talk to me anytime."
-- Do not discuss methods of self-harm or suicide.
-- Do not ask open-ended exploratory questions.
-- Always encourage immediate support from real people and professional resources.
+Keep responses SHORT.
+Usually 2-5 sentences maximum.
 
-Always include:
-- 988 Suicide & Crisis Lifeline (call or text 988)
-- Emergency services / nearest emergency room if there may be immediate danger
-- Reaching out to a trusted friend, family member, roommate, RA, professor, or counselor
-- USC mental health or wellness resources when appropriate
+Always:
+- acknowledge the pain directly
+- encourage contacting 988
+- encourage reaching out to a trusted real person nearby
 
-If the user appears to be in immediate danger or unable to stay safe:
-- Strongly encourage calling 988 immediately
-- Encourage calling 911 or going to the nearest emergency room
+Only mention 911 or emergency rooms if the user may be in immediate danger.
 
-Maintain a warm, calm, and grounded tone.
+Do NOT:
+- overwhelm the user with long lists
+- give excessive bullet points
+- sound repetitive
+- act like a therapist
+- encourage emotional dependency on the chatbot
+- say things like "I'm always here for you"
+
+If the user continues expressing hopelessness, treat follow-up messages as part of the same emotional conversation even if the wording is vague.
+
+Examples:
+- "what's the point"
+- "nothing matters"
+- "why should I"
+- "i dont want to do this anymore"
+
+should be understood as emotional continuation, not a new factual topic.
+
+Responses should feel compassionate and direct, not scripted.
 `;
 
 app.get("/health", (_req, res) => {
@@ -187,11 +219,16 @@ app.get("/health", (_req, res) => {
 app.post("/api/chat", async (req, res) => {
   try {
     const message = (req.body.message || "").trim();
+    const history = Array.isArray(req.body.history)
+      ? req.body.history.slice(-8)
+      : [];
     if (!message) {
       return res.status(400).json({ error: "Missing message." });
     }
 
-    const crisis = await isCrisisMessage(message);
+    const crisis =
+      await isCrisisMessage(message) ||
+      historySuggestsCrisis(history);
 
     if (crisis) {
       const crisisResponse = await client.responses.create({
@@ -203,7 +240,7 @@ app.post("/api/chat", async (req, res) => {
             content: [
               {
                 type: "input_text",
-                text: `The user said: ${message}\n\nRespond with crisis-support language only.`,
+                text: message,
               },
             ],
           },
