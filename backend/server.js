@@ -281,9 +281,26 @@ app.post("/api/chat", async (req, res) => {
 
     const response = await client.responses.create({
       model: CHAT_MODEL,
-      instructions:
-        "Answer the user's question using only the provided context. If the context is insufficient, say so plainly. Be concise and accurate.",
-      input: `Context:\n${context}\n\nUser question:\n${message}`,
+      instructions: `
+        Answer the user's question using the provided context AND the recent conversation history.
+
+        If the user's message is short, vague, emotional, or dependent on previous messages, interpret it in conversational context before assuming it is a brand-new factual question.
+
+        Keep the conversation natural and context-aware.
+
+        Use the knowledge base for factual USC/USG information.
+
+        If the knowledge base truly does not contain enough information, say so plainly.
+
+        Be concise, accurate, and human.
+      `,
+      input: [
+        ...history,
+        {
+          role: "user",
+          content: `Context:\n${context}\n\nCurrent user message:\n${message}`,
+        },
+      ],
     });
 
     const uniqueSourcesMap = new Map();
