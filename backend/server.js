@@ -91,9 +91,63 @@ async function topChunksDb(queryEmbedding, k = 4) {
   return rows;
 }
 
-app.use(cors());
-app.use(express.json());
+// Render sits behind a proxy; needed for per-IP rate limiting.
+app.set("trust proxy", 1);
+
+// Browser callers: the USG site, the GitHub Pages widget host, localhost.
+// Non-browser clients send no Origin header and are unaffected (CORS is a
+// browser mechanism, not API auth — rate limiting below covers the rest).
+const ALLOWED_ORIGINS = (
+  process.env.CORS_ORIGINS || "https://usg.usc.edu,https://arsalanghogari.github.io"
+).split(",");
+app.use(
+  cors({
+    origin: (origin, cb) =>
+      cb(
+        null,
+        !origin ||
+          ALLOWED_ORIGINS.includes(origin) ||
+          /^https?:\/\/localhost(:\d+)?$/.test(origin)
+      ),
+  })
+);
+
+app.use(express.json({ limit: "50kb" }));
+
+const rateLimit = require("express-rate-limit");
+app.use(
+  "/api/",
+  rateLimit({
+    windowMs: 60_000,
+    max: Number(process.env.RATE_LIMIT_PER_MIN) || 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
+
 app.use(express.static(path.join(__dirname, "..", "docs")));
+
+const MAX_MESSAGE_CHARS = 2000;
+
+// Shared request validation for both chat endpoints.
+// Returns {message, history} or {error}.
+function parseChatBody(body) {
+  const message = (body?.message || "").trim();
+  if (!message) return { error: "Missing message." };
+  if (message.length > MAX_MESSAGE_CHARS) {
+    return { error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` };
+  }
+  const history = (Array.isArray(body.history) ? body.history : [])
+    .filter(
+      (m) =>
+        m &&
+        (m.role === "user" || m.role === "assistant") &&
+        typeof m.content === "string" &&
+        m.content.length <= MAX_MESSAGE_CHARS * 2
+    )
+    .slice(-8);
+  return { message, history };
+}
 
 function loadKb() {
   if (!fs.existsSync(KB_PATH)) {
@@ -329,6 +383,25 @@ async function crisisPayload(message, history) {
   };
 }
 
+// One source per URL, keeping the best-scoring chunk's metadata.
+function dedupSources(matches) {
+  const byUrl = new Map();
+  for (const chunk of matches) {
+    const existing = byUrl.get(chunk.source_url);
+    if (!existing || chunk.score > existing.score) {
+      byUrl.set(chunk.source_url, {
+        source_title: chunk.source_title,
+        source_url: chunk.source_url,
+        score: chunk.score,
+        source_modified: chunk.source_modified || null,
+        source_modified_year: chunk.source_modified_year || null,
+        evergreen: Boolean(chunk.evergreen),
+      });
+    }
+  }
+  return Array.from(byUrl.values());
+}
+
 // Shared RAG prep: embed -> retrieve -> rerank -> prompt + deduped sources.
 // Throws err with .status when the KB is empty.
 async function ragPrepare(message, trace) {
@@ -406,22 +479,7 @@ async function ragPrepare(message, trace) {
         Be concise, accurate, and human.
       `;
 
-  const uniqueSourcesMap = new Map();
-  for (const chunk of matches) {
-    const key = chunk.source_url;
-    const existing = uniqueSourcesMap.get(key);
-    if (!existing || chunk.score > existing.score) {
-      uniqueSourcesMap.set(key, {
-        source_title: chunk.source_title,
-        source_url: chunk.source_url,
-        score: chunk.score,
-        source_modified: chunk.source_modified || null,
-        source_modified_year: chunk.source_modified_year || null,
-        evergreen: Boolean(chunk.evergreen),
-      });
-    }
-  }
-  const sources = Array.from(uniqueSourcesMap.values());
+  const sources = dedupSources(matches);
   const { notice } = assessFreshness(sources);
   const userContent = `Context:\n${context}\n\nCurrent user message:\n${message}`;
 
@@ -434,12 +492,9 @@ app.get("/health", (_req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const message = (req.body.message || "").trim();
-    const history = Array.isArray(req.body.history)
-      ? req.body.history.slice(-8)
-      : [];
-    if (!message) {
-      return res.status(400).json({ error: "Missing message." });
+    const { message, history, error } = parseChatBody(req.body);
+    if (error) {
+      return res.status(400).json({ error });
     }
 
     // Crisis check and retrieval run concurrently; the crisis verdict still
@@ -491,10 +546,9 @@ app.post("/api/chat", async (req, res) => {
 
 app.post("/api/chat/stream", async (req, res) => {
   try {
-    const message = (req.body.message || "").trim();
-    const history = Array.isArray(req.body.history) ? req.body.history.slice(-8) : [];
-    if (!message) {
-      return res.status(400).json({ error: "Missing message." });
+    const { message, history, error } = parseChatBody(req.body);
+    if (error) {
+      return res.status(400).json({ error });
     }
 
     res.set({
@@ -591,5 +645,8 @@ module.exports = {
   topChunksDb,
   assessFreshness,
   hasCrisisKeywords,
+  cosineSimilarity,
+  dedupSources,
+  parseChatBody,
   pool,
 };
