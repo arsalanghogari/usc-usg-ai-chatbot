@@ -436,7 +436,7 @@
 
   <script>
     // same-origin when served by the local backend, Render otherwise
-    const API = location.hostname === "localhost"
+    const API = ["localhost", "127.0.0.1"].includes(location.hostname)
       ? "/api/chat"
       : "https://usg-chat-backend.onrender.com/api/chat";
     const MODE = new URLSearchParams(location.search).get("embed") || "bubble";

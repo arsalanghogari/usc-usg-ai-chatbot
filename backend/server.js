@@ -107,7 +107,7 @@ app.use(
         null,
         !origin ||
           ALLOWED_ORIGINS.includes(origin) ||
-          /^https?:\/\/localhost(:\d+)?$/.test(origin)
+          /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
       ),
   })
 );
