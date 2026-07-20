@@ -9,15 +9,18 @@
   },
   {
     "url": "https://usg.usc.edu/legislative-branch/",
-    "title": "USG Legislative Branch"
+    "title": "USG Legislative Branch",
+    "evergreen": true
   },
   {
     "url": "https://usg.usc.edu/branches/communications/",
-    "title": "USG Communications Department"
+    "title": "USG Communications Department",
+    "evergreen": true
   },
   {
     "url": "https://usg.usc.edu/branches/funding/",
-    "title": "USG Funding Department"
+    "title": "USG Funding Department",
+    "evergreen": true
   },
   {
     "url": "https://usg.usc.edu/blog/2026/03/03/february-24th-2026-senate-press-release/",
@@ -29,14 +32,17 @@
   },
   {
     "url": "https://usg.usc.edu/resources/health-and-wellness/",
-    "title": "Health and Wellness Resources"
+    "title": "Health and Wellness Resources",
+    "evergreen": true
   },
   {
     "url": "https://usg.usc.edu/executive-branch/",
-    "title": "USG Executive Branch"
+    "title": "USG Executive Branch",
+    "evergreen": true
   },
   {
     "url": "https://usg.usc.edu/branches/programming/",
-    "title": "USG Programming Department"
+    "title": "USG Programming Department",
+    "evergreen": true
   }
 ]

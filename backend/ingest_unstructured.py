@@ -12,12 +12,14 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from unstructured.chunking.title import chunk_by_title
 from unstructured.partition.html import partition_html
+from urllib.parse import urlparse
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 PAGES_PATH = BASE_DIR / "pages.json"
 KB_PATH = BASE_DIR / "kb.json"
+WP_API_BASE = os.getenv("WP_API_BASE", "https://usg.usc.edu/wp-json/wp/v2")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
@@ -77,9 +79,36 @@ def load_pages() -> List[Dict[str, str]]:
             {
                 "url": page["url"],
                 "title": page.get("title") or page["url"],
+                "evergreen": bool(page.get("evergreen")),
             }
         )
     return cleaned
+
+
+def wp_modified_gmt(url: str) -> str | None:
+    """Look up a page/post's last-modified date via the WP REST API by slug.
+
+    Content itself still comes from the live URL (REST content.rendered is
+    Divi shortcode soup) — this only fetches the date.
+    """
+    slug = urlparse(url).path.rstrip("/").split("/")[-1]
+    if not slug:
+        return None
+    for endpoint in ("pages", "posts"):
+        try:
+            r = requests.get(
+                f"{WP_API_BASE}/{endpoint}",
+                params={"slug": slug, "_fields": "modified_gmt"},
+                headers=HEADERS,
+                timeout=15,
+            )
+            r.raise_for_status()
+            items = r.json()
+            if items:
+                return items[0]["modified_gmt"] + "Z"
+        except Exception as e:
+            print(f"  date lookup ({endpoint}/{slug}) failed: {e}", file=sys.stderr)
+    return None
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
@@ -93,9 +122,12 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     return [item.embedding for item in response.data]
 
 
-def ingest_page(page: Dict[str, str]) -> List[Dict[str, Any]]:
+def ingest_page(page: Dict[str, Any]) -> List[Dict[str, Any]]:
     url = page["url"]
     title = page["title"]
+
+    modified = wp_modified_gmt(url)
+    modified_year = int(modified[:4]) if modified else None
 
     response = requests.get(url, headers=HEADERS, timeout=30)
     response.raise_for_status()
@@ -127,6 +159,9 @@ def ingest_page(page: Dict[str, str]) -> List[Dict[str, Any]]:
                     "source_title": title,
                     "chunk_index": chunk_index,
                     "text": text,
+                    "source_modified": modified,
+                    "source_modified_year": modified_year,
+                    "evergreen": page["evergreen"],
                     "metadata": metadata,
                 }
             )

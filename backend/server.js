@@ -12,6 +12,8 @@ const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const CHAT_MODEL = process.env.CHAT_MODEL || "gpt-5.4-mini";
 const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
+const CONTACT_FORM_URL = process.env.CONTACT_FORM_URL || "https://usg.usc.edu/contact/";
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "usg@usc.edu";
 
 if (!OPENAI_API_KEY) {
   console.error("Set OPENAI_API_KEY in your environment.");
@@ -23,7 +25,7 @@ const KB_PATH = path.join(__dirname, "kb.json");
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "..", "frontend")));
+app.use(express.static(path.join(__dirname, "..", "docs")));
 
 function loadKb() {
   if (!fs.existsSync(KB_PATH)) {
@@ -57,6 +59,26 @@ async function embed(text) {
     input: text,
   });
   return resp.data[0].embedding;
+}
+
+// Deterministic staleness gate — code decides, never the model.
+// A source is stale if it's not evergreen and was last modified before the
+// current year. Missing dates are treated as fresh (pre-date-gate kb.json
+// has no dates; gating on "unknown" would flag everything).
+function assessFreshness(sources, now = new Date()) {
+  const year = now.getFullYear();
+  const stale = sources.filter(
+    (s) => !s.evergreen && s.source_modified_year && s.source_modified_year < year
+  );
+  if (!stale.length) return { stale, notice: "" };
+  const oldest = Math.min(...stale.map((s) => s.source_modified_year));
+  return {
+    stale,
+    notice:
+      `\n\n---\n⚠️ Some of this answer comes from pages last updated in ${oldest}, ` +
+      `so details may have changed. To confirm, [contact USG](${CONTACT_FORM_URL}) ` +
+      `or email ${CONTACT_EMAIL}.`,
+  };
 }
 
 function topChunks(queryEmbedding, chunks, k = 4) {
@@ -272,17 +294,24 @@ app.post("/api/chat", async (req, res) => {
     const queryEmbedding = await embed(message);
     const matches = topChunks(queryEmbedding, kb.chunks, 4);
 
+    const today = new Date().toISOString().slice(0, 10);
     const context = matches
       .map(
         (chunk, idx) =>
-          `[${idx + 1}] ${chunk.source_title}\n${chunk.source_url}\n${chunk.text}`
+          `[${idx + 1}] ${chunk.source_title}` +
+          (chunk.source_modified ? ` (page last updated: ${chunk.source_modified.slice(0, 10)})` : "") +
+          `\n${chunk.source_url}\n${chunk.text}`
       )
       .join("\n\n");
 
     const response = await client.responses.create({
       model: CHAT_MODEL,
       instructions: `
+        Today's date is ${today}.
+
         Answer the user's question using the provided context AND the recent conversation history.
+
+        Each context source shows when its page was last updated. When answering about time-sensitive things (elections, events, results, deadlines), mention how current the information is, e.g. "as of the page's last update in March 2026...". Do not decide whether information is outdated beyond citing these dates.
 
         If the user's message is short, vague, emotional, or dependent on previous messages, interpret it in conversational context before assuming it is a brand-new factual question.
 
@@ -314,13 +343,19 @@ app.post("/api/chat", async (req, res) => {
           source_title: chunk.source_title,
           source_url: chunk.source_url,
           score: chunk.score,
+          source_modified: chunk.source_modified || null,
+          source_modified_year: chunk.source_modified_year || null,
+          evergreen: Boolean(chunk.evergreen),
         });
       }
     }
 
+    const sources = Array.from(uniqueSourcesMap.values());
+    const { notice } = assessFreshness(sources);
+
     res.json({
-      answer: response.output_text || "",
-      sources: Array.from(uniqueSourcesMap.values()),
+      answer: (response.output_text || "") + notice,
+      sources,
       crisis: false,
     });
   } catch (err) {
