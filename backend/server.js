@@ -14,6 +14,9 @@ const CHAT_MODEL = process.env.CHAT_MODEL || "gpt-5.4-mini";
 const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 const CONTACT_FORM_URL = process.env.CONTACT_FORM_URL || "https://usg.usc.edu/contact/";
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "usg@usc.edu";
+// RAG answers are simple grounded extraction — low effort cuts
+// time-to-first-token sharply. Crisis generation is left untouched.
+const REASONING_EFFORT = process.env.REASONING_EFFORT || "low";
 
 if (!OPENAI_API_KEY) {
   console.error("Set OPENAI_API_KEY in your environment.");
@@ -300,122 +303,92 @@ should be understood as emotional continuation, not a new factual topic.
 Responses should feel compassionate and direct, not scripted.
 `;
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true });
-});
+// Returns the complete, guardrail-checked crisis payload, or null if the
+// message is not a crisis. Always generated in full before anything is
+// shown — the streaming endpoint must never stream this path.
+async function crisisPayload(message, history) {
+  const crisis = (await isCrisisMessage(message)) || historySuggestsCrisis(history);
+  if (!crisis) return null;
 
-app.post("/api/chat", async (req, res) => {
-  try {
-    const message = (req.body.message || "").trim();
-    const history = Array.isArray(req.body.history)
-      ? req.body.history.slice(-8)
-      : [];
-    if (!message) {
-      return res.status(400).json({ error: "Missing message." });
-    }
+  const crisisResponse = await client.responses.create({
+    model: CHAT_MODEL,
+    instructions: CRISIS_INSTRUCTIONS,
+    input: [
+      {
+        role: "user",
+        content: [{ type: "input_text", text: message }],
+      },
+    ],
+  });
 
-    const crisis =
-      await isCrisisMessage(message) ||
-      historySuggestsCrisis(history);
+  const answer = crisisResponse.output_text || pickCrisisReply(message);
+  return {
+    crisis: true,
+    answer: hasDisallowedAssistantLanguage(answer) ? pickCrisisReply(message) : answer,
+    sources: CRISIS_SOURCES,
+  };
+}
 
-    if (crisis) {
-      const crisisResponse = await client.responses.create({
-        model: CHAT_MODEL,
-        instructions: CRISIS_INSTRUCTIONS,
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: message,
-              },
-            ],
-          },
-        ],
-      });
+// Shared RAG prep: embed -> retrieve -> rerank -> prompt + deduped sources.
+// Throws err with .status when the KB is empty.
+async function ragPrepare(message, trace) {
+  let t = new Date();
+  const queryEmbedding = await embed(message);
+  trace?.span({
+    name: "embed",
+    startTime: t,
+    endTime: new Date(),
+    metadata: { model: EMBED_MODEL },
+  });
 
-      const answer = crisisResponse.output_text || pickCrisisReply(message);
+  t = new Date();
+  const kCandidates = RERANK ? RERANK_CANDIDATES : 4;
+  let matches;
+  if (pool) {
+    matches = await topChunksDb(queryEmbedding, kCandidates);
+  } else {
+    matches = topChunks(queryEmbedding, loadKb().chunks, kCandidates);
+  }
+  if (!matches.length) {
+    const err = new Error("Knowledge base is empty. Run ingestion first.");
+    err.status = 400;
+    throw err;
+  }
+  trace?.span({
+    name: "retrieve",
+    startTime: t,
+    endTime: new Date(),
+    output: matches.map((m) => ({
+      url: m.source_url,
+      chunk: m.chunk_index,
+      score: m.score,
+    })),
+    metadata: { backend: pool ? "pgvector" : "kb.json", k: kCandidates },
+  });
 
-      if (hasDisallowedAssistantLanguage(answer)) {
-        return res.json({
-          crisis: true,
-          answer: pickCrisisReply(message),
-          sources: CRISIS_SOURCES,
-        });
-      }
-
-      return res.json({
-        crisis: true,
-        answer,
-        sources: CRISIS_SOURCES,
-      });
-    }
-
-    const trace = langfuse?.trace({ name: "chat", input: message });
-
-    let t = new Date();
-    const queryEmbedding = await embed(message);
+  if (RERANK) {
+    t = new Date();
+    matches = await rerank(message, matches, 4);
     trace?.span({
-      name: "embed",
+      name: "rerank",
       startTime: t,
       endTime: new Date(),
-      metadata: { model: EMBED_MODEL },
+      output: matches.map((m) => ({ url: m.source_url, chunk: m.chunk_index })),
+      metadata: { model: RERANK_MODEL },
     });
+  }
 
-    t = new Date();
-    const kCandidates = RERANK ? RERANK_CANDIDATES : 4;
-    let matches;
-    if (pool) {
-      matches = await topChunksDb(queryEmbedding, kCandidates);
-    } else {
-      const kb = loadKb();
-      if (!kb.chunks.length) {
-        return res.status(400).json({ error: "kb.json is empty. Run ingestion first." });
-      }
-      matches = topChunks(queryEmbedding, kb.chunks, kCandidates);
-    }
-    if (!matches.length) {
-      return res.status(400).json({ error: "Knowledge base is empty. Run ingestion first." });
-    }
-    trace?.span({
-      name: "retrieve",
-      startTime: t,
-      endTime: new Date(),
-      output: matches.map((m) => ({
-        url: m.source_url,
-        chunk: m.chunk_index,
-        score: m.score,
-      })),
-      metadata: { backend: pool ? "pgvector" : "kb.json", k: kCandidates },
-    });
+  const today = new Date().toISOString().slice(0, 10);
+  const context = matches
+    .map(
+      (chunk, idx) =>
+        `[${idx + 1}] ${chunk.source_title}` +
+        (chunk.source_modified ? ` (page last updated: ${chunk.source_modified.slice(0, 10)})` : "") +
+        `\n${chunk.source_url}\n${chunk.text}`
+    )
+    .join("\n\n");
 
-    if (RERANK) {
-      t = new Date();
-      matches = await rerank(message, matches, 4);
-      trace?.span({
-        name: "rerank",
-        startTime: t,
-        endTime: new Date(),
-        output: matches.map((m) => ({ url: m.source_url, chunk: m.chunk_index })),
-        metadata: { model: RERANK_MODEL },
-      });
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const context = matches
-      .map(
-        (chunk, idx) =>
-          `[${idx + 1}] ${chunk.source_title}` +
-          (chunk.source_modified ? ` (page last updated: ${chunk.source_modified.slice(0, 10)})` : "") +
-          `\n${chunk.source_url}\n${chunk.text}`
-      )
-      .join("\n\n");
-
-    t = new Date();
-    const response = await client.responses.create({
-      model: CHAT_MODEL,
-      instructions: `
+  const instructions = `
         Today's date is ${today}.
 
         Answer the user's question using the provided context AND the recent conversation history.
@@ -431,40 +404,69 @@ app.post("/api/chat", async (req, res) => {
         If the knowledge base truly does not contain enough information, say so plainly.
 
         Be concise, accurate, and human.
-      `,
-      input: [
-        ...history,
-        {
-          role: "user",
-          content: `Context:\n${context}\n\nCurrent user message:\n${message}`,
-        },
-      ],
-    });
+      `;
 
-    const uniqueSourcesMap = new Map();
-
-    for (const chunk of matches) {
-      const key = chunk.source_url;
-      const existing = uniqueSourcesMap.get(key);
-
-      if (!existing || chunk.score > existing.score) {
-        uniqueSourcesMap.set(key, {
-          source_title: chunk.source_title,
-          source_url: chunk.source_url,
-          score: chunk.score,
-          source_modified: chunk.source_modified || null,
-          source_modified_year: chunk.source_modified_year || null,
-          evergreen: Boolean(chunk.evergreen),
-        });
-      }
+  const uniqueSourcesMap = new Map();
+  for (const chunk of matches) {
+    const key = chunk.source_url;
+    const existing = uniqueSourcesMap.get(key);
+    if (!existing || chunk.score > existing.score) {
+      uniqueSourcesMap.set(key, {
+        source_title: chunk.source_title,
+        source_url: chunk.source_url,
+        score: chunk.score,
+        source_modified: chunk.source_modified || null,
+        source_modified_year: chunk.source_modified_year || null,
+        evergreen: Boolean(chunk.evergreen),
+      });
     }
+  }
+  const sources = Array.from(uniqueSourcesMap.values());
+  const { notice } = assessFreshness(sources);
+  const userContent = `Context:\n${context}\n\nCurrent user message:\n${message}`;
+
+  return { instructions, userContent, sources, notice };
+}
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const message = (req.body.message || "").trim();
+    const history = Array.isArray(req.body.history)
+      ? req.body.history.slice(-8)
+      : [];
+    if (!message) {
+      return res.status(400).json({ error: "Missing message." });
+    }
+
+    // Crisis check and retrieval run concurrently; the crisis verdict still
+    // gates the response — nothing is sent until it resolves.
+    const trace = langfuse?.trace({ name: "chat", input: message });
+    const ragPromise = ragPrepare(message, trace).catch((e) => e);
+    const crisis = await crisisPayload(message, history);
+    if (crisis) return res.json(crisis);
+
+    const rag = await ragPromise;
+    if (rag instanceof Error) throw rag;
+    const { instructions, userContent, sources, notice } = rag;
+
+    const t = new Date();
+    const response = await client.responses.create({
+      model: CHAT_MODEL,
+      instructions,
+      input: [...history, { role: "user", content: userContent }],
+      reasoning: { effort: REASONING_EFFORT },
+    });
 
     trace?.generation({
       name: "generate",
       model: CHAT_MODEL,
       startTime: t,
       endTime: new Date(),
-      input: `Context:\n${context}\n\nCurrent user message:\n${message}`,
+      input: userContent,
       output: response.output_text || "",
       usage: {
         input: response.usage?.input_tokens,
@@ -472,10 +474,7 @@ app.post("/api/chat", async (req, res) => {
       },
     });
 
-    const sources = Array.from(uniqueSourcesMap.values());
-    const { notice } = assessFreshness(sources);
     const answer = (response.output_text || "") + notice;
-
     trace?.update({ output: answer });
     langfuse?.flushAsync().catch(() => {});
 
@@ -486,7 +485,91 @@ app.post("/api/chat", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message || "Server error" });
+    res.status(err.status || 500).json({ error: err.message || "Server error" });
+  }
+});
+
+app.post("/api/chat/stream", async (req, res) => {
+  try {
+    const message = (req.body.message || "").trim();
+    const history = Array.isArray(req.body.history) ? req.body.history.slice(-8) : [];
+    if (!message) {
+      return res.status(400).json({ error: "Missing message." });
+    }
+
+    res.set({
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.flushHeaders();
+    const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+    // Crisis answers are generated and guardrail-checked in full, then sent
+    // as one event — never token-streamed. The check runs concurrently with
+    // retrieval but always resolves before the first token goes out.
+    const trace = langfuse?.trace({ name: "chat-stream", input: message });
+    const ragPromise = ragPrepare(message, trace).catch((e) => e);
+    const crisis = await crisisPayload(message, history);
+    if (crisis) {
+      send(crisis);
+      send({ done: true });
+      return res.end();
+    }
+
+    const rag = await ragPromise;
+    if (rag instanceof Error) throw rag;
+    const { instructions, userContent, sources, notice } = rag;
+
+    const abort = new AbortController();
+    req.on("close", () => abort.abort());
+
+    const t = new Date();
+    const stream = await client.responses.create(
+      {
+        model: CHAT_MODEL,
+        instructions,
+        input: [...history, { role: "user", content: userContent }],
+        reasoning: { effort: REASONING_EFFORT },
+        stream: true,
+      },
+      { signal: abort.signal }
+    );
+
+    let full = "";
+    let usage = null;
+    for await (const event of stream) {
+      if (event.type === "response.output_text.delta") {
+        full += event.delta;
+        send({ delta: event.delta });
+      } else if (event.type === "response.completed") {
+        usage = event.response?.usage;
+      }
+    }
+
+    trace?.generation({
+      name: "generate",
+      model: CHAT_MODEL,
+      startTime: t,
+      endTime: new Date(),
+      input: userContent,
+      output: full,
+      usage: { input: usage?.input_tokens, output: usage?.output_tokens },
+    });
+    trace?.update({ output: full + notice });
+    langfuse?.flushAsync().catch(() => {});
+
+    send({ done: true, sources, notice, crisis: false });
+    res.end();
+  } catch (err) {
+    if (err.name === "AbortError") return res.end();
+    console.error(err);
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ error: err.message || "Server error" })}\n\n`);
+      return res.end();
+    }
+    res.status(err.status || 500).json({ error: err.message || "Server error" });
   }
 });
 

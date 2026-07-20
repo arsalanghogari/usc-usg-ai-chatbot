@@ -5,3 +5,5 @@
 {"ts":"2026-07-20T09:40:18.276Z","git":"c936fad","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":1,"mrr":0.98,"faithfulness":null}
 {"ts":"2026-07-20T09:50:08.342Z","git":"c936fad","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":1,"mrr":0.98,"faithfulness":0.824}
 {"ts":"2026-07-20T10:01:21.221Z","git":"c936fad","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":1,"mrr":0.98,"faithfulness":0.882}
+{"ts":"2026-07-20T10:57:45.832Z","git":"9a9288f","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":1,"mrr":0.971,"faithfulness":null}
+{"ts":"2026-07-20T11:08:14.424Z","git":"9a9288f","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":1,"mrr":0.971,"faithfulness":0.882}

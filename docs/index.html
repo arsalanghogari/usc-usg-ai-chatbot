@@ -435,7 +435,10 @@
   </div>
 
   <script>
-    const API = "https://usg-chat-backend.onrender.com/api/chat";
+    // same-origin when served by the local backend, Render otherwise
+    const API = location.hostname === "localhost"
+      ? "/api/chat"
+      : "https://usg-chat-backend.onrender.com/api/chat";
     const MODE = new URLSearchParams(location.search).get("embed") || "bubble";
     document.body.classList.add(`mode-${MODE}`);
     const launcher = document.getElementById("launcher");
@@ -545,40 +548,94 @@
           content: text
         });
         const recentHistory = history.slice(-8);
-        const r = await fetch(API, {
+        const r = await fetch(API + "/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: text, history: recentHistory })
         });
 
-        const js = await r.json();
-        thinking.remove();
-
-        if (!r.ok) {
+        if (!r.ok || !(r.headers.get("content-type") || "").includes("text/event-stream")) {
+          const js = await r.json().catch(() => ({}));
           throw new Error(js.error || "Request failed");
         }
 
-        const rawAnswer = js && js.answer ? js.answer : "";
-        const cleaned = rawAnswer.replace(/\[source:(.*?)\|(.*?)\]/g, "").trim();
+        // swap the "..." bubble for a live one we append tokens into
+        thinking.remove();
+        const wrap = document.createElement("div");
+        wrap.className = "msg bot";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        wrap.appendChild(bubble);
+        messages.appendChild(wrap);
+
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let full = "";
+        let finalSources = [];
+        let streamError = null;
+
+        const render = () => {
+          bubble.innerHTML = DOMPurify.sanitize(marked.parse(full));
+          messages.scrollTop = messages.scrollHeight;
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop();
+          for (const part of parts) {
+            if (!part.startsWith("data: ")) continue;
+            const ev = JSON.parse(part.slice(6));
+            if (ev.delta) {
+              full += ev.delta;
+              render();
+            } else if (ev.crisis) {
+              full = ev.answer || "Please call or text 988 right now.";
+              finalSources = ev.sources || [];
+              render();
+            } else if (ev.done) {
+              full += ev.notice || "";
+              finalSources = ev.sources || finalSources;
+            } else if (ev.error) {
+              streamError = ev.error;
+            }
+          }
+        }
+
+        if (streamError && !full) throw new Error(streamError);
+
+        full = full.replace(/\[source:(.*?)\|(.*?)\]/g, "").trim();
+        render();
 
         const uniqueSourcesMap = new Map();
-        (Array.isArray(js.sources) ? js.sources : []).forEach((s) => {
+        finalSources.forEach((s) => {
           const key = s.source_url || s.source_title || Math.random().toString(36);
           if (!uniqueSourcesMap.has(key)) uniqueSourcesMap.set(key, s);
         });
-        const uniqueSources = Array.from(uniqueSourcesMap.values());
+        if (uniqueSourcesMap.size) {
+          const sourcesDiv = document.createElement("div");
+          sourcesDiv.className = "sources";
+          sourcesDiv.innerHTML = `<div class="sources-label">Sources:</div>`;
+          uniqueSourcesMap.forEach((s) => {
+            const a = document.createElement("a");
+            a.className = "source-link";
+            a.href = s.source_url || "#";
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = s.source_title || s.source_url || "Source";
+            sourcesDiv.appendChild(a);
+          });
+          wrap.appendChild(sourcesDiv);
+          messages.scrollTop = messages.scrollHeight;
+        }
 
         history.push({
           role: "assistant",
-          content: cleaned || ""
+          content: full || ""
         });
-        
-        if (js.crisis) {
-          appendMessage("bot", cleaned || "Please call 988 right now or go to the nearest emergency help right away.", uniqueSources);
-          statusEl.textContent = "";
-          return;
-        }
-        appendMessage("bot", cleaned || "(No answer returned.)", uniqueSources);
         statusEl.textContent = "";
       } catch (e) {
         thinking.remove();
