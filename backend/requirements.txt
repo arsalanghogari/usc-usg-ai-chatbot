@@ -2,3 +2,4 @@ unstructured==0.22.6
 openai==2.30.0
 requests==2.33.0
 python-dotenv==1.2.2
+psycopg[binary]==3.3.4

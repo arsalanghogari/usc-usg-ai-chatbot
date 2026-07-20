@@ -23,6 +23,32 @@ if (!OPENAI_API_KEY) {
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 const KB_PATH = path.join(__dirname, "kb.json");
 
+// Postgres/pgvector retrieval when SUPABASE_DB_URL is set; kb.json fallback
+// otherwise so the app keeps working before the env var lands everywhere.
+const { Pool } = require("pg");
+const pool = process.env.SUPABASE_DB_URL
+  ? new Pool({
+      connectionString: process.env.SUPABASE_DB_URL,
+      max: 5,
+      ssl: { rejectUnauthorized: false },
+    })
+  : null;
+
+async function topChunksDb(queryEmbedding, k = 4) {
+  const vec = `[${queryEmbedding.join(",")}]`;
+  const { rows } = await pool.query(
+    `select source_url, source_title, chunk_index, text,
+            source_modified::text as source_modified,
+            source_modified_year, evergreen,
+            1 - (embedding <=> $1::vector) as score
+     from chunks
+     order by embedding <=> $1::vector
+     limit $2`,
+    [vec, k]
+  );
+  return rows;
+}
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "docs")));
@@ -130,6 +156,7 @@ function hasCrisisKeywords(message) {
     /\bhurt myself\b/i,
     /\boverdose\b/i,
     /\bnot want to be here\b/i,
+    /\b(don'?t|do not) want to (be here|live|exist)\b/i,
     /\bwant to die\b/i,
   ];
 
@@ -286,13 +313,20 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    const kb = loadKb();
-    if (!kb.chunks.length) {
-      return res.status(400).json({ error: "kb.json is empty. Run ingestion first." });
-    }
-
     const queryEmbedding = await embed(message);
-    const matches = topChunks(queryEmbedding, kb.chunks, 4);
+    let matches;
+    if (pool) {
+      matches = await topChunksDb(queryEmbedding, 4);
+    } else {
+      const kb = loadKb();
+      if (!kb.chunks.length) {
+        return res.status(400).json({ error: "kb.json is empty. Run ingestion first." });
+      }
+      matches = topChunks(queryEmbedding, kb.chunks, 4);
+    }
+    if (!matches.length) {
+      return res.status(400).json({ error: "Knowledge base is empty. Run ingestion first." });
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     const context = matches

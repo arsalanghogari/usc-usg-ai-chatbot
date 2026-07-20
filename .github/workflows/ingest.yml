@@ -25,6 +25,7 @@ jobs:
       - name: Run ingestion
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python backend/ingest_unstructured.py
 
       - name: Commit updated kb.json

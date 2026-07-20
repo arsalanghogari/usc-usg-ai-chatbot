@@ -20,6 +20,67 @@ BASE_DIR = Path(__file__).resolve().parent
 PAGES_PATH = BASE_DIR / "pages.json"
 KB_PATH = BASE_DIR / "kb.json"
 WP_API_BASE = os.getenv("WP_API_BASE", "https://usg.usc.edu/wp-json/wp/v2")
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
+
+SCHEMA_SQL = """
+create extension if not exists vector;
+create table if not exists chunks (
+  id bigint generated always as identity primary key,
+  source_url text not null,
+  source_title text,
+  chunk_index int not null,
+  text text not null,
+  source_modified timestamptz,
+  source_modified_year int,
+  evergreen boolean not null default false,
+  embedding vector(1536),
+  unique (source_url, chunk_index)
+);
+create index if not exists chunks_embedding_hnsw
+  on chunks using hnsw (embedding vector_cosine_ops);
+"""
+
+UPSERT_SQL = """
+insert into chunks (source_url, source_title, chunk_index, text,
+                    source_modified, source_modified_year, evergreen, embedding)
+values (%s, %s, %s, %s, %s, %s, %s, %s::vector)
+on conflict (source_url, chunk_index) do update set
+  source_title = excluded.source_title,
+  text = excluded.text,
+  source_modified = excluded.source_modified,
+  source_modified_year = excluded.source_modified_year,
+  evergreen = excluded.evergreen,
+  embedding = excluded.embedding
+"""
+
+
+def push_to_db(records: List[Dict[str, Any]]) -> None:
+    import psycopg
+
+    with psycopg.connect(SUPABASE_DB_URL) as conn, conn.cursor() as cur:
+        cur.execute(SCHEMA_SQL)
+        cur.executemany(
+            UPSERT_SQL,
+            [
+                (
+                    r["source_url"], r["source_title"], r["chunk_index"], r["text"],
+                    r["source_modified"], r["source_modified_year"], r["evergreen"],
+                    json.dumps(r["embedding"]),
+                )
+                for r in records
+            ],
+        )
+        # Drop rows for pages no longer in the allowlist, and stale tail
+        # chunks from pages that shrank since the last crawl.
+        urls = sorted({r["source_url"] for r in records})
+        cur.execute("delete from chunks where not (source_url = any(%s))", (urls,))
+        for url in urls:
+            n = sum(1 for r in records if r["source_url"] == url)
+            cur.execute(
+                "delete from chunks where source_url = %s and chunk_index >= %s",
+                (url, n),
+            )
+    print(f"Upserted {len(records)} chunks into Postgres")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
@@ -147,7 +208,7 @@ def ingest_page(page: Dict[str, Any]) -> List[Dict[str, Any]]:
         chunks = chunk_by_title(elements, max_characters=1200)
 
         records: List[Dict[str, Any]] = []
-        for chunk_index, chunk in enumerate(chunks):
+        for chunk in chunks:
             text = normalize_text(getattr(chunk, "text", ""))
             if not text:
                 continue
@@ -157,7 +218,9 @@ def ingest_page(page: Dict[str, Any]) -> List[Dict[str, Any]]:
                 {
                     "source_url": url,
                     "source_title": title,
-                    "chunk_index": chunk_index,
+                    # dense numbering (no gaps) — the DB trim of removed tail
+                    # chunks relies on it
+                    "chunk_index": len(records),
                     "text": text,
                     "source_modified": modified,
                     "source_modified_year": modified_year,
@@ -199,6 +262,11 @@ def main() -> None:
 
     KB_PATH.write_text(json.dumps(kb, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote {KB_PATH} with {len(all_records)} chunks")
+
+    if SUPABASE_DB_URL:
+        push_to_db(all_records)
+    else:
+        print("SUPABASE_DB_URL not set, skipping Postgres push", file=sys.stderr)
 
 
 if __name__ == "__main__":
