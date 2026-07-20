@@ -383,6 +383,156 @@ async function crisisPayload(message, history) {
   };
 }
 
+// ---- Agentic routing: KB retrieval vs live events calendar ---------------
+
+const WP_EVENTS_API =
+  process.env.WP_EVENTS_API || "https://usg.usc.edu/wp-json/tribe/events/v1";
+const ROUTER_MODEL = process.env.ROUTER_MODEL || "gpt-5.4-mini";
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+const AGENT_TOOLS = [
+  {
+    type: "function",
+    name: "search_knowledge_base",
+    strict: true,
+    description:
+      "Search the USG website knowledge base: departments, branches, funding policies, resources, elections, press releases, people and rosters, and anything that already happened (past meetings, outcomes, results, announcements).",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "get_upcoming_events",
+    strict: true,
+    description:
+      "Fetch live UPCOMING events from the USG events calendar. Use only for future/scheduled happenings — what's coming up, when something meets next, this week's events. Never for past meetings or their outcomes.",
+    parameters: {
+      type: "object",
+      properties: {
+        search: {
+          type: ["string", "null"],
+          description: "Optional keyword filter, e.g. 'senate' or 'wellness'",
+        },
+      },
+      required: ["search"],
+      additionalProperties: false,
+    },
+  },
+];
+
+// One forced tool call decides the path. Falls back to KB on any failure —
+// the bot must keep answering even if routing breaks.
+async function routeTool(message, history, trace) {
+  const t = new Date();
+  try {
+    const resp = await client.responses.create({
+      model: ROUTER_MODEL,
+      instructions: "Route the user's question to exactly one tool.",
+      input: [...history, { role: "user", content: message }],
+      tools: AGENT_TOOLS,
+      tool_choice: "required",
+    });
+    const call = (resp.output || []).find((o) => o.type === "function_call");
+    let args = {};
+    try {
+      args = JSON.parse(call?.arguments || "{}");
+    } catch {}
+    const route = {
+      tool: call?.name === "get_upcoming_events" ? "events" : "kb",
+      args,
+    };
+    trace?.span({
+      name: "route",
+      startTime: t,
+      endTime: new Date(),
+      output: route,
+      metadata: { model: ROUTER_MODEL },
+    });
+    return route;
+  } catch (e) {
+    console.warn("router failed, defaulting to kb:", e.message);
+    return { tool: "kb", args: {} };
+  }
+}
+
+// Live-events counterpart of ragPrepare: same return shape, so both
+// endpoints treat the two paths identically.
+async function eventsPrepare(message, args, trace) {
+  const t = new Date();
+  const today = new Date().toISOString().slice(0, 10);
+
+  async function fetchEvents(search) {
+    const params = new URLSearchParams({ per_page: "10", start_date: today });
+    if (search) params.set("search", search);
+    const r = await fetch(`${WP_EVENTS_API}/events?${params}`, {
+      headers: { "User-Agent": BROWSER_UA },
+    });
+    if (!r.ok) return [];
+    return ((await r.json()).events || []).map((e) => ({
+      title: e.title,
+      start: e.start_date,
+      end: e.end_date,
+      venue: e.venue?.venue || null,
+      url: e.url,
+    }));
+  }
+
+  let events = [];
+  try {
+    events = await fetchEvents(args?.search);
+    if (!events.length && args?.search) events = await fetchEvents(null);
+  } catch (e) {
+    console.warn("events fetch failed:", e.message);
+  }
+  trace?.span({
+    name: "get_upcoming_events",
+    startTime: t,
+    endTime: new Date(),
+    output: events,
+    metadata: { search: args?.search || null },
+  });
+
+  const instructions = `
+        Today's date is ${today}.
+
+        Answer using the live events list below — it was fetched from the USG events calendar just now and is current. Give dates, times, and locations plainly, and interpret relative words like "next" or "this week" against today's date.
+
+        If the list is empty, say the calendar lookup found nothing (or the calendar couldn't be reached) and point the user to the calendar page instead of guessing.
+
+        Be concise, accurate, and human.
+      `;
+  const userContent = `Live upcoming USG events (fetched just now):\n${JSON.stringify(events, null, 1)}\n\nCurrent user message:\n${message}`;
+  const sources = [
+    {
+      source_title: "USG Events Calendar",
+      source_url: "https://usg.usc.edu/calendar/",
+      score: 1,
+      source_modified: null,
+      source_modified_year: null,
+      evergreen: true,
+    },
+  ];
+  return { instructions, userContent, sources, notice: "" };
+}
+
+// Route, then prepare via the chosen tool. Shared by both endpoints.
+// KB prep runs speculatively while the router decides — most questions are
+// KB questions, so routing adds ~no latency; a wasted embed+rerank on the
+// events path costs fractions of a cent.
+async function agentPrepare(message, history, trace) {
+  const ragPromise = ragPrepare(message, trace).catch((e) => e);
+  const route = await routeTool(message, history, trace);
+  if (route.tool === "events") return eventsPrepare(message, route.args, trace);
+  const rag = await ragPromise;
+  if (rag instanceof Error) throw rag;
+  return rag;
+}
+
 // One source per URL, keeping the best-scoring chunk's metadata.
 function dedupSources(matches) {
   const byUrl = new Map();
@@ -500,7 +650,7 @@ app.post("/api/chat", async (req, res) => {
     // Crisis check and retrieval run concurrently; the crisis verdict still
     // gates the response — nothing is sent until it resolves.
     const trace = langfuse?.trace({ name: "chat", input: message });
-    const ragPromise = ragPrepare(message, trace).catch((e) => e);
+    const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
     const crisis = await crisisPayload(message, history);
     if (crisis) return res.json(crisis);
 
@@ -564,7 +714,7 @@ app.post("/api/chat/stream", async (req, res) => {
     // as one event — never token-streamed. The check runs concurrently with
     // retrieval but always resolves before the first token goes out.
     const trace = langfuse?.trace({ name: "chat-stream", input: message });
-    const ragPromise = ragPrepare(message, trace).catch((e) => e);
+    const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
     const crisis = await crisisPayload(message, history);
     if (crisis) {
       send(crisis);
@@ -648,5 +798,7 @@ module.exports = {
   cosineSimilarity,
   dedupSources,
   parseChatBody,
+  routeTool,
+  eventsPrepare,
   pool,
 };

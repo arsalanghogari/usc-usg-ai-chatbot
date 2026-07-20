@@ -1,0 +1,21 @@
+[
+  { "q": "When is the next senate meeting?", "tool": "events" },
+  { "q": "What USG events are happening this week?", "tool": "events" },
+  { "q": "When does the wellness committee meet next?", "tool": "events" },
+  { "q": "Are there any USG events coming up?", "tool": "events" },
+  { "q": "What's on the USG calendar for August?", "tool": "events" },
+  { "q": "Is there a USG meeting tomorrow?", "tool": "events" },
+  { "q": "Any concerts committee events soon?", "tool": "events" },
+  { "q": "What time is the next USG event and where?", "tool": "events" },
+
+  { "q": "How do I apply for funding for my club?", "tool": "kb" },
+  { "q": "Who is the USG president?", "tool": "kb" },
+  { "q": "What does the advocacy department do?", "tool": "kb" },
+  { "q": "What bills passed at the February 24th senate meeting?", "tool": "kb" },
+  { "q": "How do I join USG?", "tool": "kb" },
+  { "q": "Where can I find mental health resources?", "tool": "kb" },
+  { "q": "Who won the 2026 USG election?", "tool": "kb" },
+  { "q": "What is the Performing and Visual Arts Fund?", "tool": "kb" },
+  { "q": "How do I get a graphic made for my org's event?", "tool": "kb" },
+  { "q": "Which buildings have late night study rooms?", "tool": "kb" }
+]
