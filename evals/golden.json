@@ -1,0 +1,50 @@
+[
+  { "q": "Who won the 2026 USG presidential election?", "expected": "https://usg.usc.edu/elections-2026/" },
+  { "q": "Who is the 2026-27 USG vice president?", "expected": "https://usg.usc.edu/elections-2026/" },
+  { "q": "When was the intent to run application due for the 2026 elections?", "expected": "https://usg.usc.edu/elections-2026/" },
+  { "q": "What is the deadline for write-in candidates?", "expected": "https://usg.usc.edu/elections-2026/" },
+  { "q": "What DEIB workshops did election candidates attend?", "expected": "https://usg.usc.edu/elections-2026/" },
+  { "q": "How do I contact the elections team?", "expected": "https://usg.usc.edu/elections-2026/" },
+  { "q": "When were the 2026 election results announced?", "expected": "https://usg.usc.edu/elections-2026/" },
+
+  { "q": "Who is the current USG president?", "expected": ["https://usg.usc.edu/meet-our-team-executive-cabinet/", "https://usg.usc.edu/executive-branch/"] },
+  { "q": "What is the email of the USG chief diversity officer?", "expected": ["https://usg.usc.edu/meet-our-team-executive-cabinet/", "https://usg.usc.edu/executive-branch/"] },
+  { "q": "Who is on the USG executive cabinet?", "expected": ["https://usg.usc.edu/meet-our-team-executive-cabinet/", "https://usg.usc.edu/executive-branch/"] },
+
+  { "q": "What does the legislative branch of USG do?", "expected": "https://usg.usc.edu/legislative-branch/" },
+  { "q": "How many senators are in the USG senate?", "expected": "https://usg.usc.edu/legislative-branch/" },
+  { "q": "Who is the speaker of the senate?", "expected": ["https://usg.usc.edu/legislative-branch/", "https://usg.usc.edu/executive-branch/"] },
+
+  { "q": "What teams make up the communications department?", "expected": "https://usg.usc.edu/branches/communications/" },
+  { "q": "How can my club get a graphic made for our event?", "expected": "https://usg.usc.edu/branches/communications/" },
+  { "q": "Who handles USG press releases and public statements?", "expected": "https://usg.usc.edu/branches/communications/" },
+
+  { "q": "How do I apply for USG funding for my student organization?", "expected": "https://usg.usc.edu/branches/funding/" },
+  { "q": "When do funding applications have to be submitted?", "expected": "https://usg.usc.edu/branches/funding/" },
+  { "q": "What is the Performing and Visual Arts Fund?", "expected": "https://usg.usc.edu/branches/funding/" },
+  { "q": "How much money can USG allocate to student orgs per year?", "expected": "https://usg.usc.edu/branches/funding/" },
+  { "q": "What email do I use for funding questions?", "expected": "https://usg.usc.edu/branches/funding/" },
+  { "q": "Is there a fund for newly registered student organizations?", "expected": "https://usg.usc.edu/branches/funding/" },
+
+  { "q": "What bills did the senate pass at the February 24th 2026 meeting?", "expected": "https://usg.usc.edu/blog/2026/03/03/february-24th-2026-senate-press-release/" },
+  { "q": "What is the Unit Rollover Program?", "expected": "https://usg.usc.edu/blog/2026/03/03/february-24th-2026-senate-press-release/" },
+  { "q": "Why was the Undocumented Trojans Success Assembly renamed?", "expected": ["https://usg.usc.edu/blog/2026/03/03/february-24th-2026-senate-press-release/", "https://usg.usc.edu/branches/programming/"] },
+
+  { "q": "Who won the fall 2025 senate special election?", "expected": "https://usg.usc.edu/blog/2025/10/13/fall-2025-senate-special-elections-result/" },
+  { "q": "What was Zachary Garcia's campaign platform called?", "expected": "https://usg.usc.edu/blog/2025/10/13/fall-2025-senate-special-elections-result/" },
+
+  { "q": "Where can I get free HIV testing at USC?", "expected": "https://usg.usc.edu/resources/health-and-wellness/" },
+  { "q": "What mental health resources does USG list?", "expected": "https://usg.usc.edu/resources/health-and-wellness/" },
+  { "q": "What is the 988 lifeline?", "expected": "https://usg.usc.edu/resources/health-and-wellness/" },
+
+  { "q": "What is USC doing about free ChatGPT access for students?", "expected": "https://usg.usc.edu/executive-branch/" },
+  { "q": "When will USC get mobile ID cards?", "expected": "https://usg.usc.edu/executive-branch/" },
+  { "q": "Which buildings have late night study rooms open until 11pm?", "expected": "https://usg.usc.edu/executive-branch/" },
+  { "q": "Where is the Period Pantry located?", "expected": ["https://usg.usc.edu/executive-branch/", "https://usg.usc.edu/resources/health-and-wellness/"] },
+
+  { "q": "What assemblies are part of the programming department?", "expected": "https://usg.usc.edu/branches/programming/" },
+  { "q": "What does the Queer and Ally Student Assembly do?", "expected": "https://usg.usc.edu/branches/programming/" },
+  { "q": "Who has the Speakers Committee brought to campus in the past?", "expected": "https://usg.usc.edu/branches/programming/" },
+  { "q": "How do I contact the Transfer Student Assembly?", "expected": "https://usg.usc.edu/branches/programming/" },
+  { "q": "Which committee organizes concerts on campus?", "expected": "https://usg.usc.edu/branches/programming/" }
+]

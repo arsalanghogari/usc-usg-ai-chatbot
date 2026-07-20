@@ -34,6 +34,15 @@ const pool = process.env.SUPABASE_DB_URL
     })
   : null;
 
+// Langfuse tracing, active only when keys are set (LANGFUSE_SECRET_KEY,
+// LANGFUSE_PUBLIC_KEY, optional LANGFUSE_BASEURL). Crisis requests are
+// deliberately never traced — that content stays out of analytics tools.
+let langfuse = null;
+if (process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY) {
+  const { Langfuse } = require("langfuse");
+  langfuse = new Langfuse();
+}
+
 async function topChunksDb(queryEmbedding, k = 4) {
   const vec = `[${queryEmbedding.join(",")}]`;
   const { rows } = await pool.query(
@@ -313,7 +322,18 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
+    const trace = langfuse?.trace({ name: "chat", input: message });
+
+    let t = new Date();
     const queryEmbedding = await embed(message);
+    trace?.span({
+      name: "embed",
+      startTime: t,
+      endTime: new Date(),
+      metadata: { model: EMBED_MODEL },
+    });
+
+    t = new Date();
     let matches;
     if (pool) {
       matches = await topChunksDb(queryEmbedding, 4);
@@ -327,6 +347,17 @@ app.post("/api/chat", async (req, res) => {
     if (!matches.length) {
       return res.status(400).json({ error: "Knowledge base is empty. Run ingestion first." });
     }
+    trace?.span({
+      name: "retrieve",
+      startTime: t,
+      endTime: new Date(),
+      output: matches.map((m) => ({
+        url: m.source_url,
+        chunk: m.chunk_index,
+        score: m.score,
+      })),
+      metadata: { backend: pool ? "pgvector" : "kb.json" },
+    });
 
     const today = new Date().toISOString().slice(0, 10);
     const context = matches
@@ -338,6 +369,7 @@ app.post("/api/chat", async (req, res) => {
       )
       .join("\n\n");
 
+    t = new Date();
     const response = await client.responses.create({
       model: CHAT_MODEL,
       instructions: `
@@ -384,11 +416,28 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
+    trace?.generation({
+      name: "generate",
+      model: CHAT_MODEL,
+      startTime: t,
+      endTime: new Date(),
+      input: `Context:\n${context}\n\nCurrent user message:\n${message}`,
+      output: response.output_text || "",
+      usage: {
+        input: response.usage?.input_tokens,
+        output: response.usage?.output_tokens,
+      },
+    });
+
     const sources = Array.from(uniqueSourcesMap.values());
     const { notice } = assessFreshness(sources);
+    const answer = (response.output_text || "") + notice;
+
+    trace?.update({ output: answer });
+    langfuse?.flushAsync().catch(() => {});
 
     res.json({
-      answer: (response.output_text || "") + notice,
+      answer,
       sources,
       crisis: false,
     });
@@ -398,6 +447,21 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+  client,
+  CHAT_MODEL,
+  embed,
+  loadKb,
+  topChunks,
+  topChunksDb,
+  assessFreshness,
+  hasCrisisKeywords,
+  pool,
+};
