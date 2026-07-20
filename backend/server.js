@@ -831,6 +831,11 @@ app.post("/api/chat/stream", async (req, res) => {
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(
+      pool
+        ? "retrieval: pgvector (SUPABASE_DB_URL set)"
+        : "retrieval: kb.json fallback — SUPABASE_DB_URL NOT set; kb.json is no longer committed, so production MUST have the env var"
+    );
   });
 }
 
