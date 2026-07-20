@@ -676,6 +676,21 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+// Which DB is this instance actually talking to? (diagnostic — host is
+// masked to a prefix, no credentials)
+app.get("/health/db", async (_req, res) => {
+  if (!pool) return res.json({ pool: false });
+  try {
+    const host = new URL(process.env.SUPABASE_DB_URL).hostname;
+    const { rows } = await pool.query(
+      "select current_database() as db, (select count(*)::int from chunks) as chunks"
+    );
+    res.json({ pool: true, host_prefix: host.slice(0, 12), ...rows[0] });
+  } catch (e) {
+    res.json({ pool: true, error: e.message });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, history, error } = parseChatBody(req.body);
