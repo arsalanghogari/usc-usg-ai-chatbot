@@ -56,12 +56,17 @@ const RERANK_CANDIDATES = 20;
 async function rerank(query, candidates, k = 4) {
   if (candidates.length <= k) return candidates;
   const list = candidates
-    .map((c, i) => `[${i}] (${c.source_title}) ${c.text.slice(0, 500)}`)
+    .map(
+      (c, i) =>
+        `[${i}] (${c.source_title}` +
+        (c.source_modified ? `, updated ${String(c.source_modified).slice(0, 10)}` : "") +
+        `) ${c.text.slice(0, 500)}`
+    )
     .join("\n\n");
   try {
     const resp = await client.responses.create({
       model: RERANK_MODEL,
-      instructions: `You are a search reranker. Given a query and numbered passages, reply with ONLY a JSON array of the indices of the ${k} passages most relevant to the query, most relevant first.`,
+      instructions: `You are a search reranker. Today is ${new Date().toISOString().slice(0, 10)}. Given a query and numbered passages, reply with ONLY a JSON array of the indices of the ${k} passages most relevant to the query, most relevant first. For queries about the current state of things (who holds a role, what resources or processes exist now), prefer recently-updated pages over old dated posts; for queries about a specific past event or announcement, the dated post from that time is the right answer.`,
       input: [{ role: "user", content: `Query: ${query}\n\nPassages:\n${list}` }],
     });
     const idx = JSON.parse(resp.output_text.match(/\[[\d,\s]*\]/)[0]);

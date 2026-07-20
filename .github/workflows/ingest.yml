@@ -28,14 +28,6 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python backend/ingest_unstructured.py
 
-      - name: Commit updated kb.json
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add backend/kb.json
-          if git diff --cached --quiet; then
-            echo "kb.json unchanged, nothing to commit"
-          else
-            git commit -m "chore: scheduled kb re-ingest"
-            git push
-          fi
+# kb.json is no longer committed: Postgres is the store of record (the
+# ingestion step upserts via SUPABASE_DB_URL) and at full-site scale the
+# file would bloat git history by ~15 MB per weekly run.

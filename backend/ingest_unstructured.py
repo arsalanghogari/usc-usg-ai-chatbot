@@ -13,6 +13,7 @@ from openai import OpenAI
 from unstructured.chunking.title import chunk_by_title
 from unstructured.partition.html import partition_html
 from urllib.parse import urlparse
+from html import unescape
 
 load_dotenv()
 
@@ -124,26 +125,73 @@ def metadata_to_dict(metadata: Any) -> Dict[str, Any]:
     return {"value": str(metadata)}
 
 
-def load_pages() -> List[Dict[str, str]]:
+def load_pages() -> List[Dict[str, Any]]:
+    """Auto-discover every published WP page and post via the REST API,
+    filtered/flagged by the policy in pages.json."""
     if not PAGES_PATH.exists():
         raise FileNotFoundError(f"Missing {PAGES_PATH}")
 
-    pages = json.loads(PAGES_PATH.read_text(encoding="utf-8"))
-    if not isinstance(pages, list):
-        raise ValueError("pages.json must contain a list")
+    cfg = json.loads(PAGES_PATH.read_text(encoding="utf-8"))
+    if not isinstance(cfg, dict):
+        raise ValueError("pages.json must be a policy object (see _comment)")
+    exclude = cfg.get("exclude", [])
+    evergreen_patterns = cfg.get("evergreen_patterns", [])
 
-    cleaned: List[Dict[str, str]] = []
-    for i, page in enumerate(pages):
-        if not isinstance(page, dict) or not page.get("url"):
-            raise ValueError(f"Invalid page at index {i}: {page}")
-        cleaned.append(
+    items: List[Dict[str, Any]] = []
+    for endpoint in ("pages", "posts"):
+        page_num = 1
+        while True:
+            r = requests.get(
+                f"{WP_API_BASE}/{endpoint}",
+                params={
+                    "per_page": 100,
+                    "page": page_num,
+                    "_fields": "link,title,modified_gmt",
+                },
+                headers=HEADERS,
+                timeout=30,
+            )
+            r.raise_for_status()
+            items.extend(r.json())
+            if page_num >= int(r.headers.get("X-WP-TotalPages", 1)):
+                break
+            page_num += 1
+
+    pages: List[Dict[str, Any]] = []
+    seen = set()
+    skipped = 0
+    for it in items:
+        url = it["link"]
+        path = urlparse(url).path
+        if url in seen:
+            continue
+        if any(x in path for x in exclude):
+            skipped += 1
+            continue
+        seen.add(url)
+        pages.append(
             {
-                "url": page["url"],
-                "title": page.get("title") or page["url"],
-                "evergreen": bool(page.get("evergreen")),
+                "url": url,
+                "title": unescape(it["title"]["rendered"]).strip() or url,
+                "evergreen": any(p in path for p in evergreen_patterns),
+                "modified": (it["modified_gmt"] + "Z") if it.get("modified_gmt") else None,
             }
         )
-    return cleaned
+
+    for extra in cfg.get("extra", []):
+        if extra.get("url") and extra["url"] not in seen:
+            seen.add(extra["url"])
+            pages.append(
+                {
+                    "url": extra["url"],
+                    "title": extra.get("title") or extra["url"],
+                    "evergreen": bool(extra.get("evergreen")),
+                    "modified": None,
+                }
+            )
+
+    print(f"Discovered {len(pages)} pages/posts ({skipped} excluded by policy)")
+    return pages
 
 
 def wp_modified_gmt(url: str) -> str | None:
@@ -173,21 +221,25 @@ def wp_modified_gmt(url: str) -> str | None:
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
-    if not texts:
-        return []
-
-    response = client.embeddings.create(
-        model=EMBED_MODEL,
-        input=texts,
-    )
-    return [item.embedding for item in response.data]
+    # batched: one request for hundreds of chunks can exceed the
+    # embeddings API per-request token cap
+    embeddings: List[List[float]] = []
+    for i in range(0, len(texts), 100):
+        response = client.embeddings.create(
+            model=EMBED_MODEL,
+            input=texts[i : i + 100],
+        )
+        embeddings.extend(item.embedding for item in response.data)
+    return embeddings
 
 
 def ingest_page(page: Dict[str, Any]) -> List[Dict[str, Any]]:
     url = page["url"]
     title = page["title"]
 
-    modified = wp_modified_gmt(url)
+    # discovery supplies modified_gmt; the per-slug lookup is only the
+    # fallback for manually-added 'extra' URLs
+    modified = page.get("modified") or wp_modified_gmt(url)
     modified_year = int(modified[:4]) if modified else None
 
     response = requests.get(url, headers=HEADERS, timeout=30)
