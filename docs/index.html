@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />  <!-- Mobile-friendly meta tag -->
-  <title>USG Chat</title>
+  <title>Ask USG — USC Undergraduate Student Government</title>
   <style>
     /* Reusable theme values with var(--name) */
     :root {
@@ -12,10 +12,12 @@
       --border: #e5e7eb;
       --text: #111827;
       --muted: #6b7280;
-      --user: #0f172a;
+      --user: #ffffff;
       --bot: #111827;
-      --accent: #2563eb;
-      --accent-hover: #1d4ed8;
+      --cardinal: #990000;
+      --gold: #ffcc00;
+      --accent: #990000;
+      --accent-hover: #7a0000;
       --shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
     }
 
@@ -81,14 +83,18 @@
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      box-shadow: 0 12px 30px rgba(37, 99, 235, 0.35);
+      box-shadow: 0 12px 30px rgba(153, 0, 0, 0.35);
       z-index: 1000;
       transition: transform 0.18s ease, box-shadow 0.18s ease;
+      background: #ffffff;
+      border: 3px solid var(--cardinal);
+      border-radius: 50%;
+      overflow: hidden;
     }
 
     .chat-launcher:hover {
       transform: translateY(-2px) scale(1.03);
-      box-shadow: 0 16px 36px rgba(37, 99, 235, 0.42);
+      box-shadow: 0 16px 36px rgba(153, 0, 0, 0.45);
     }
 
     .chat-launcher:active {
@@ -132,13 +138,13 @@
     }
 
     .chat-header {
-      padding: 16px 16px 14px;
-      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+      border-bottom: 3px solid var(--gold);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      background: linear-gradient(180deg, #f8fafc, #ffffff);
+      background: linear-gradient(135deg, #7a0000, var(--cardinal));
     }
 
     .chat-header-left {
@@ -170,18 +176,19 @@
       font-size: 16px;
       font-weight: 700;
       line-height: 1.2;
+      color: #ffffff;
     }
 
     .chat-subtitle {
       margin: 2px 0 0;
       font-size: 12px;
-      color: var(--muted);
+      color: var(--gold);
     }
 
     .chat-close {
       border: none;
       background: transparent;
-      color: var(--muted);
+      color: rgba(255, 255, 255, 0.75);
       font-size: 28px;
       line-height: 1;
       cursor: pointer;
@@ -190,7 +197,7 @@
     }
 
     .chat-close:hover {
-      color: var(--text);
+      color: #ffffff;
     }
 
     .messages {
@@ -208,9 +215,10 @@
 
     .bubble {
       max-width: 90%;
-      padding: 12px 14px;
+      padding: 10px 14px;
       border-radius: 18px;
-      white-space: pre-wrap;
+      /* no pre-wrap: content is parsed Markdown; raw newlines between HTML
+         blocks would render as stray blank space (esp. trailing) */
       word-wrap: break-word;
       line-height: 1.45;
       font-size: 14px;
@@ -221,7 +229,7 @@
     }
 
     .user .bubble {
-      background: #e0efff;
+      background: var(--cardinal);
       color: var(--user);
       border-bottom-right-radius: 6px;
     }
@@ -252,7 +260,7 @@
     .source-link {
       display: block;
       margin-top: 5px;
-      color: #2563eb;
+      color: var(--cardinal);
       text-decoration: none;
       word-break: break-word;
     }
@@ -284,8 +292,8 @@
     }
 
     .composer input:focus {
-      border-color: #93c5fd;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+      border-color: var(--cardinal);
+      box-shadow: 0 0 0 3px rgba(153, 0, 0, 0.12);
     }
 
     .composer button {
@@ -340,13 +348,22 @@
     }
 
     .avatar-wrap {
-      width: 180px;
-      height: 180px;
+      width: 100%;
+      height: 100%;
       overflow: hidden;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+
+    /* chat-scale avatar in the header, full-size in the launcher */
+    .chat-header .avatar-wrap {
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+      background: #ffffff;
+      border: 2px solid var(--gold);
     }
 
     .avatar-img {
@@ -415,8 +432,8 @@
             <img src="tommy.png" alt="Chat avatar" class="avatar-img" />
           </div>
           <div class="chat-title-wrap">
-            <h1 class="chat-title" id="chatTitle">USG Chat</h1>
-            <p class="chat-subtitle">Ask about approved USG pages</p>
+            <h1 class="chat-title" id="chatTitle">Ask USG</h1>
+            <p class="chat-subtitle">USC Undergraduate Student Government</p>
           </div>
         </div>
         <button class="chat-close" id="closeBtn" aria-label="Close chat">&times;</button>
