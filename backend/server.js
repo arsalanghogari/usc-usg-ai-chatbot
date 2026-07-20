@@ -43,6 +43,36 @@ if (process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY) {
   langfuse = new Langfuse();
 }
 
+// Two-stage retrieval: RERANK=0 disables the second stage (for A/B evals).
+const RERANK = process.env.RERANK !== "0";
+const RERANK_MODEL = process.env.RERANK_MODEL || "gpt-5.4-mini";
+const RERANK_CANDIDATES = 20;
+
+// ponytail: LLM reranker on the existing OpenAI key; swap this function's
+// body for Cohere Rerank (cross-encoder) if a COHERE_API_KEY ever lands
+async function rerank(query, candidates, k = 4) {
+  if (candidates.length <= k) return candidates;
+  const list = candidates
+    .map((c, i) => `[${i}] (${c.source_title}) ${c.text.slice(0, 500)}`)
+    .join("\n\n");
+  try {
+    const resp = await client.responses.create({
+      model: RERANK_MODEL,
+      instructions: `You are a search reranker. Given a query and numbered passages, reply with ONLY a JSON array of the indices of the ${k} passages most relevant to the query, most relevant first.`,
+      input: [{ role: "user", content: `Query: ${query}\n\nPassages:\n${list}` }],
+    });
+    const idx = JSON.parse(resp.output_text.match(/\[[\d,\s]*\]/)[0]);
+    const picked = idx
+      .filter((i) => Number.isInteger(i) && candidates[i])
+      .slice(0, k)
+      .map((i) => candidates[i]);
+    return picked.length ? picked : candidates.slice(0, k);
+  } catch (e) {
+    console.warn("rerank failed, using vector order:", e.message);
+    return candidates.slice(0, k);
+  }
+}
+
 async function topChunksDb(queryEmbedding, k = 4) {
   const vec = `[${queryEmbedding.join(",")}]`;
   const { rows } = await pool.query(
@@ -334,15 +364,16 @@ app.post("/api/chat", async (req, res) => {
     });
 
     t = new Date();
+    const kCandidates = RERANK ? RERANK_CANDIDATES : 4;
     let matches;
     if (pool) {
-      matches = await topChunksDb(queryEmbedding, 4);
+      matches = await topChunksDb(queryEmbedding, kCandidates);
     } else {
       const kb = loadKb();
       if (!kb.chunks.length) {
         return res.status(400).json({ error: "kb.json is empty. Run ingestion first." });
       }
-      matches = topChunks(queryEmbedding, kb.chunks, 4);
+      matches = topChunks(queryEmbedding, kb.chunks, kCandidates);
     }
     if (!matches.length) {
       return res.status(400).json({ error: "Knowledge base is empty. Run ingestion first." });
@@ -356,8 +387,20 @@ app.post("/api/chat", async (req, res) => {
         chunk: m.chunk_index,
         score: m.score,
       })),
-      metadata: { backend: pool ? "pgvector" : "kb.json" },
+      metadata: { backend: pool ? "pgvector" : "kb.json", k: kCandidates },
     });
+
+    if (RERANK) {
+      t = new Date();
+      matches = await rerank(message, matches, 4);
+      trace?.span({
+        name: "rerank",
+        startTime: t,
+        endTime: new Date(),
+        output: matches.map((m) => ({ url: m.source_url, chunk: m.chunk_index })),
+        metadata: { model: RERANK_MODEL },
+      });
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     const context = matches
@@ -383,7 +426,7 @@ app.post("/api/chat", async (req, res) => {
 
         Keep the conversation natural and context-aware.
 
-        Use the knowledge base for factual USC/USG information.
+        Use the knowledge base for factual USC/USG information. State only facts found in the context — do not fill gaps from general knowledge, and do not attribute to a resource anything the context does not say about it.
 
         If the knowledge base truly does not contain enough information, say so plainly.
 
@@ -457,6 +500,8 @@ module.exports = {
   app,
   client,
   CHAT_MODEL,
+  RERANK,
+  rerank,
   embed,
   loadKb,
   topChunks,

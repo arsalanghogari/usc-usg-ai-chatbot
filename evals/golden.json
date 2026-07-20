@@ -46,5 +46,18 @@
   { "q": "What does the Queer and Ally Student Assembly do?", "expected": "https://usg.usc.edu/branches/programming/" },
   { "q": "Who has the Speakers Committee brought to campus in the past?", "expected": "https://usg.usc.edu/branches/programming/" },
   { "q": "How do I contact the Transfer Student Assembly?", "expected": "https://usg.usc.edu/branches/programming/" },
-  { "q": "Which committee organizes concerts on campus?", "expected": "https://usg.usc.edu/branches/programming/" }
+  { "q": "Which committee organizes concerts on campus?", "expected": "https://usg.usc.edu/branches/programming/" },
+
+  { "q": "What does the USG advocacy department do?", "expected": "https://usg.usc.edu/branches/advocacy/" },
+  { "q": "What does the judicial branch of USG do?", "expected": ["https://usg.usc.edu/judicial-branch/", "https://usg.usc.edu/meet-our-team-judicial/"] },
+  { "q": "What is the USG Senate and what does it do?", "expected": ["https://usg.usc.edu/branches/senate/", "https://usg.usc.edu/legislative-branch/"] },
+  { "q": "How do I join USG?", "expected": "https://usg.usc.edu/join/" },
+  { "q": "What is the mission of USC's undergraduate student government?", "expected": ["https://usg.usc.edu/branches/about-2-0/", "https://usg.usc.edu/executive-branch/"] },
+  { "q": "Who do I call in a campus emergency?", "expected": "https://usg.usc.edu/resources/emergencies/" },
+  { "q": "Where can I find free menstrual products on campus?", "expected": ["https://usg.usc.edu/resources-health-and-wellness-menstrual-product-map/", "https://usg.usc.edu/resources/health-and-wellness/", "https://usg.usc.edu/executive-branch/"] },
+  { "q": "What resources does USG offer for Black students?", "expected": "https://usg.usc.edu/black-community-support/" },
+  { "q": "How do I start a new student organization at USC?", "expected": ["https://usg.usc.edu/resources/rsos/", "https://usg.usc.edu/join/"] },
+  { "q": "How can I find volunteer and community service opportunities?", "expected": "https://usg.usc.edu/resources/service-and-involvement/" },
+  { "q": "Who is the director of the funding department?", "expected": ["https://usg.usc.edu/meet-our-team-funding/", "https://usg.usc.edu/branches/funding/"] },
+  { "q": "Who are the current USG senators?", "expected": ["https://usg.usc.edu/meet-our-team-legislative/", "https://usg.usc.edu/branches/senate/", "https://usg.usc.edu/legislative-branch/"] }
 ]

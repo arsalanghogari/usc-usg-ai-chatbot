@@ -44,5 +44,89 @@
     "url": "https://usg.usc.edu/branches/programming/",
     "title": "USG Programming Department",
     "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/branches/advocacy/",
+    "title": "USG Advocacy Department",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/judicial-branch/",
+    "title": "USG Judicial Branch",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/branches/senate/",
+    "title": "USG Senate",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/branches/about-2-0/",
+    "title": "About USG",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/join/",
+    "title": "Get Involved with USG",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/contact/",
+    "title": "Contact USG",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/resources/",
+    "title": "Official USG Resources",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/resources/resources-guides/",
+    "title": "USG Resource Guides",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/resources/service-and-involvement/",
+    "title": "Service and Involvement Resources",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/resources/emergencies/",
+    "title": "Emergency Contacts",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/resources-health-and-wellness-menstrual-product-map/",
+    "title": "Menstrual Product Map",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/black-community-support/",
+    "title": "Black Community Support",
+    "evergreen": true
+  },
+  {
+    "url": "https://usg.usc.edu/resources/rsos/",
+    "title": "Student Organization (RSO) Resources"
+  },
+  {
+    "url": "https://usg.usc.edu/meet-our-team-programming/",
+    "title": "Programming Department Team"
+  },
+  {
+    "url": "https://usg.usc.edu/meet-our-team-communications/",
+    "title": "Communications Department Team"
+  },
+  {
+    "url": "https://usg.usc.edu/meet-our-team-funding/",
+    "title": "Funding Department Team"
+  },
+  {
+    "url": "https://usg.usc.edu/meet-our-team-legislative/",
+    "title": "Legislative Branch Team"
+  },
+  {
+    "url": "https://usg.usc.edu/meet-our-team-judicial/",
+    "title": "Judicial Branch Team"
   }
 ]

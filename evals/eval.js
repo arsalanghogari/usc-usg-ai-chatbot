@@ -17,9 +17,12 @@ const golden = JSON.parse(fs.readFileSync(path.join(__dirname, "golden.json"), "
 
 const { client, CHAT_MODEL } = server;
 
-async function retrieve(queryEmbedding) {
-  if (server.pool) return server.topChunksDb(queryEmbedding, K);
-  return server.topChunks(queryEmbedding, server.loadKb().chunks, K);
+async function retrieve(q, queryEmbedding) {
+  const kCand = server.RERANK ? 20 : K;
+  const cands = server.pool
+    ? await server.topChunksDb(queryEmbedding, kCand)
+    : server.topChunks(queryEmbedding, server.loadKb().chunks, kCand);
+  return server.RERANK ? server.rerank(q, cands, K) : cands;
 }
 
 async function judgeFaithfulness(question, answer, context) {
@@ -54,7 +57,7 @@ async function main() {
   for (const item of golden) {
     const expected = Array.isArray(item.expected) ? item.expected : [item.expected];
     const emb = await server.embed(item.q);
-    const matches = await retrieve(emb);
+    const matches = await retrieve(item.q, emb);
     const urls = [...new Set(matches.map((m) => m.source_url))];
     const rank = urls.findIndex((u) => expected.includes(u)) + 1; // 0 = miss
 
@@ -99,6 +102,7 @@ async function main() {
     ts: new Date().toISOString(),
     git: execSync("git rev-parse --short HEAD", { cwd: __dirname }).toString().trim(),
     backend: server.pool ? "pgvector" : "kb.json",
+    rerank: server.RERANK,
     k: K,
     n,
     hit_rate: +(hits / n).toFixed(3),
