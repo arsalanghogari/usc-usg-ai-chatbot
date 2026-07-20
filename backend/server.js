@@ -413,6 +413,19 @@ const AGENT_TOOLS = [
   },
   {
     type: "function",
+    name: "get_project_tracker",
+    strict: true,
+    description:
+      "Fetch the LIVE USG project tracker (Legislative Branch dashboard): current projects, how many are active, their statuses, committees, and collaborators. Use for questions about what USG is working on now, project counts, or the status of an initiative. Never for department descriptions or past events.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "get_upcoming_events",
     strict: true,
     description:
@@ -449,7 +462,8 @@ async function routeTool(message, history, trace) {
       args = JSON.parse(call?.arguments || "{}");
     } catch {}
     const route = {
-      tool: call?.name === "get_upcoming_events" ? "events" : "kb",
+      tool:
+        { get_upcoming_events: "events", get_project_tracker: "tracker" }[call?.name] || "kb",
       args,
     };
     trace?.span({
@@ -526,7 +540,105 @@ async function eventsPrepare(message, args, trace) {
   return { instructions, userContent, sources, notice: "" };
 }
 
-// LangGraph state machine: route -> (kb | events) -> END, shared by both
+const TRACKER_CSV_URL =
+  process.env.TRACKER_CSV_URL ||
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpDRrRtY-6BCNoe6psBsBa_7rkf_lTj1upbOeFHLM_J1fyRLSOULRcFBvcsFleXtNSPRJlAg5Avo9I/pub?output=csv";
+
+const TRACKER_STATUS = {
+  1: "Planning", 2: "In Progress", 3: "Almost Done",
+  4: "Postponed/Paused", 5: "Completed", 6: "Ongoing",
+};
+const TRACKER_COMMITTEE = {
+  1: "Executive", 2: "Advocacy", 3: "Senate/Legislative", 4: "Academic Affairs",
+  5: "Accessibility", 6: "Affordability & Basic Needs",
+  7: "Campus Infrastructure & Sustainability", 8: "External Affairs",
+  9: "Wellness", 10: "Senate Bill",
+};
+
+// Minimal RFC-4180 CSV parse (quoted fields, escaped quotes).
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQ = false;
+      } else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field.replace(/\r$/, "")); rows.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+// Live project-tracker counterpart of ragPrepare. The static page HTML
+// carries stale snapshot numbers (the widget renders live), so project
+// questions must come from the tracker's own published Google Sheet.
+async function trackerPrepare(message, trace) {
+  const t = new Date();
+  let projects = [];
+  try {
+    const r = await fetch(TRACKER_CSV_URL, { redirect: "follow" });
+    if (r.ok) {
+      projects = parseCsv(await r.text())
+        .slice(1)
+        .filter((row) => row[0] && row[5])
+        .map((row) => ({
+          title: row[0].trim(),
+          description: (row[1] || "").trim(),
+          status: TRACKER_STATUS[Number(row[5])] || row[5],
+          committee: TRACKER_COMMITTEE[Number(row[3])] || row[3],
+        }));
+    }
+  } catch (e) {
+    console.warn("tracker fetch failed:", e.message);
+  }
+
+  const byStatus = {};
+  for (const p of projects) byStatus[p.status] = (byStatus[p.status] || 0) + 1;
+  const summary =
+    `Total projects on the tracker: ${projects.length} ` +
+    `(the dashboard labels this count "Active Projects"). By status: ` +
+    JSON.stringify(byStatus);
+  const list = projects
+    .map((p) => `- ${p.title} [${p.status}, ${p.committee}] ${p.description}`)
+    .join("\n");
+
+  trace?.span({
+    name: "get_project_tracker",
+    startTime: t,
+    endTime: new Date(),
+    output: { count: projects.length, byStatus },
+  });
+
+  const instructions = `
+        Today's date is ${new Date().toISOString().slice(0, 10)}.
+
+        Answer using the live USG project tracker data below — it was fetched just now from the tracker's own data source and is current. Be precise about statuses: the dashboard's "Active Projects" number is the total count of listed projects, which includes completed ones; give the by-status breakdown when the user asks about active work.
+
+        If the list is empty, say the tracker couldn't be reached and point the user to the Legislative Branch page instead of guessing.
+
+        Be concise, accurate, and human.
+      `;
+  const userContent = `Live USG project tracker (fetched just now):\n${summary}\n\nProjects:\n${list}\n\nCurrent user message:\n${message}`;
+  const sources = [
+    {
+      source_title: "USG Legislative Branch — Live Project Tracker",
+      source_url: "https://usg.usc.edu/legislative-branch/",
+      score: 1,
+      source_modified: null,
+      source_modified_year: null,
+      evergreen: true,
+    },
+  ];
+  return { instructions, userContent, sources, notice: "" };
+}
+
+// LangGraph state machine: route -> (kb | events | tracker) -> END, shared by both
 // endpoints. Node bodies are the same functions as before — the graph is
 // orchestration only. KB prep still runs speculatively: the route node
 // kicks it off before awaiting the router, so routing adds ~no latency on
@@ -558,10 +670,18 @@ const agentGraph = new StateGraph(AgentState)
   .addNode("events", async (s) => ({
     prepared: await eventsPrepare(s.message, s.route.args, s.trace),
   }))
+  .addNode("tracker", async (s) => ({
+    prepared: await trackerPrepare(s.message, s.trace),
+  }))
   .addEdge(START, "router")
-  .addConditionalEdges("router", (s) => s.route.tool, { kb: "kb", events: "events" })
+  .addConditionalEdges("router", (s) => s.route.tool, {
+    kb: "kb",
+    events: "events",
+    tracker: "tracker",
+  })
   .addEdge("kb", END)
   .addEdge("events", END)
+  .addEdge("tracker", END)
   .compile();
 
 async function agentPrepare(message, history, trace) {

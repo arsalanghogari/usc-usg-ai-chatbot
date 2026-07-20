@@ -12,3 +12,4 @@
 {"ts":"2026-07-20T12:49:01.351Z","git":"bc740c4","kind":"tool-selection","n":18,"tool_accuracy":1,"wrong_tool_rate":0}
 {"ts":"2026-07-20T13:30:54.392Z","git":"f7d8ac1","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":0.941,"mrr":0.815,"faithfulness":null}
 {"ts":"2026-07-20T13:33:03.621Z","git":"f7d8ac1","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":0.98,"mrr":0.907,"faithfulness":null}
+{"ts":"2026-07-20T13:59:01.011Z","git":"05156c4","kind":"tool-selection","n":22,"tool_accuracy":1,"wrong_tool_rate":0}

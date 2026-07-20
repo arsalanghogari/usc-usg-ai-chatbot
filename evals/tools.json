@@ -1,4 +1,8 @@
 [
+  { "q": "How many active projects does USG have right now?", "tool": "tracker" },
+  { "q": "What is USG currently working on?", "tool": "tracker" },
+  { "q": "What's the status of USG's dining nutrition project?", "tool": "tracker" },
+  { "q": "How many USG projects are completed this year?", "tool": "tracker" },
   { "q": "When is the next senate meeting?", "tool": "events" },
   { "q": "What USG events are happening this week?", "tool": "events" },
   { "q": "When does the wellness committee meet next?", "tool": "events" },
