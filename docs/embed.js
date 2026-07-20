@@ -1,8 +1,8 @@
 /* USG chat overlay loader.
  *
  * One line in the site template:
- *   <script src="https://YOUR-HOST/embed.js"
- *           data-widget-url="https://YOUR-HOST/index.html" defer></script>
+ *   <script src="https://arsalanghogari.com/usc-usg-ai-chatbot/embed.js"
+ *           data-widget-url="https://arsalanghogari.com/usc-usg-ai-chatbot/index.html" defer></script>
  *
  * Injects a transparent corner iframe running the widget in overlay mode
  * and resizes it when the widget reports open/closed via postMessage.

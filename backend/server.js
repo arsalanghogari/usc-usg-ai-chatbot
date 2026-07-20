@@ -98,7 +98,8 @@ app.set("trust proxy", 1);
 // Non-browser clients send no Origin header and are unaffected (CORS is a
 // browser mechanism, not API auth — rate limiting below covers the rest).
 const ALLOWED_ORIGINS = (
-  process.env.CORS_ORIGINS || "https://usg.usc.edu,https://arsalanghogari.github.io"
+  process.env.CORS_ORIGINS ||
+  "https://usg.usc.edu,https://arsalanghogari.github.io,https://arsalanghogari.com,https://www.arsalanghogari.com"
 ).split(",");
 app.use(
   cors({
