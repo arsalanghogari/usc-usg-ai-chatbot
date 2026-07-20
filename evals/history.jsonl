@@ -9,3 +9,4 @@
 {"ts":"2026-07-20T11:08:14.424Z","git":"9a9288f","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":1,"mrr":0.971,"faithfulness":0.882}
 {"ts":"2026-07-20T11:40:24.323Z","git":"e404f85","kind":"tool-selection","n":18,"tool_accuracy":0.944,"wrong_tool_rate":0.056}
 {"ts":"2026-07-20T11:41:04.082Z","git":"e404f85","kind":"tool-selection","n":18,"tool_accuracy":1,"wrong_tool_rate":0}
+{"ts":"2026-07-20T12:49:01.351Z","git":"bc740c4","kind":"tool-selection","n":18,"tool_accuracy":1,"wrong_tool_rate":0}

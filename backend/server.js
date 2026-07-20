@@ -520,17 +520,47 @@ async function eventsPrepare(message, args, trace) {
   return { instructions, userContent, sources, notice: "" };
 }
 
-// Route, then prepare via the chosen tool. Shared by both endpoints.
-// KB prep runs speculatively while the router decides — most questions are
-// KB questions, so routing adds ~no latency; a wasted embed+rerank on the
-// events path costs fractions of a cent.
+// LangGraph state machine: route -> (kb | events) -> END, shared by both
+// endpoints. Node bodies are the same functions as before — the graph is
+// orchestration only. KB prep still runs speculatively: the route node
+// kicks it off before awaiting the router, so routing adds ~no latency on
+// the common KB path; a wasted embed+rerank on the events path costs
+// fractions of a cent.
+const { StateGraph, Annotation, START, END } = require("@langchain/langgraph");
+
+const AgentState = Annotation.Root({
+  message: Annotation(),
+  history: Annotation(),
+  trace: Annotation(),
+  route: Annotation(),
+  ragPromise: Annotation(),
+  prepared: Annotation(),
+});
+
+const agentGraph = new StateGraph(AgentState)
+  .addNode("router", async (s) => ({
+    // property order matters: start the speculative KB prep, THEN await
+    // the router
+    ragPromise: ragPrepare(s.message, s.trace).catch((e) => e),
+    route: await routeTool(s.message, s.history, s.trace),
+  }))
+  .addNode("kb", async (s) => {
+    const rag = await s.ragPromise;
+    if (rag instanceof Error) throw rag;
+    return { prepared: rag };
+  })
+  .addNode("events", async (s) => ({
+    prepared: await eventsPrepare(s.message, s.route.args, s.trace),
+  }))
+  .addEdge(START, "router")
+  .addConditionalEdges("router", (s) => s.route.tool, { kb: "kb", events: "events" })
+  .addEdge("kb", END)
+  .addEdge("events", END)
+  .compile();
+
 async function agentPrepare(message, history, trace) {
-  const ragPromise = ragPrepare(message, trace).catch((e) => e);
-  const route = await routeTool(message, history, trace);
-  if (route.tool === "events") return eventsPrepare(message, route.args, trace);
-  const rag = await ragPromise;
-  if (rag instanceof Error) throw rag;
-  return rag;
+  const out = await agentGraph.invoke({ message, history, trace });
+  return out.prepared;
 }
 
 // One source per URL, keeping the best-scoring chunk's metadata.
@@ -800,5 +830,6 @@ module.exports = {
   parseChatBody,
   routeTool,
   eventsPrepare,
+  agentGraph,
   pool,
 };
