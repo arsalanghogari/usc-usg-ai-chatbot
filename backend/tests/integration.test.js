@@ -46,6 +46,30 @@ const mock = http.createServer((req, res) => {
 let app, api;
 
 before(async () => {
+  // kb.json is not committed (Postgres is the store of record), so CI has
+  // neither file nor DB — write a tiny fixture for the fallback path.
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const kbPath = path.join(__dirname, "..", "kb.json");
+  if (!fs.existsSync(kbPath)) {
+    fs.writeFileSync(
+      kbPath,
+      JSON.stringify({
+        ingested_at: "2026-01-01T00:00:00Z",
+        chunks: [0, 1].map((i) => ({
+          source_url: "https://usg.usc.edu/branches/funding/",
+          source_title: "USG Funding Department",
+          chunk_index: i,
+          text: `Funding fixture chunk ${i}: apply for USG funding via EngageSC.`,
+          source_modified: "2026-06-09T17:18:08Z",
+          source_modified_year: 2026,
+          evergreen: true,
+          embedding: Array(1536).fill(0.1),
+        })),
+      })
+    );
+  }
+
   await new Promise((r) => mock.listen(0, r));
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://localhost:${mock.address().port}/v1`;
