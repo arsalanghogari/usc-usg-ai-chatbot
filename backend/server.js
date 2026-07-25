@@ -167,7 +167,13 @@ function parseChatBody(body) {
         m.content.length <= MAX_MESSAGE_CHARS * 2
     )
     .slice(-8);
-  return { message, history };
+  // anonymous widget-generated session id — groups traces into
+  // conversations in Langfuse, no PII
+  const sessionId =
+    typeof body.sessionId === "string" && /^[\w-]{8,64}$/.test(body.sessionId)
+      ? body.sessionId
+      : null;
+  return { message, history, sessionId };
 }
 
 function loadKb() {
@@ -816,11 +822,16 @@ app.get("/health", (_req, res) => {
 
 // Thumbs up/down from the widget -> Langfuse score on the answer's trace.
 app.post("/api/feedback", (req, res) => {
-  const { traceId, value } = req.body || {};
+  const { traceId, value, comment } = req.body || {};
   if (!langfuse || typeof traceId !== "string" || ![0, 1].includes(value)) {
     return res.json({ ok: false });
   }
-  langfuse.score({ traceId, name: "user_feedback", value });
+  langfuse.score({
+    traceId,
+    name: "user_feedback",
+    value,
+    comment: typeof comment === "string" ? comment.slice(0, 1000) : undefined,
+  });
   langfuse.flushAsync().catch(() => {});
   res.json({ ok: true });
 });
@@ -842,7 +853,7 @@ app.get("/health/db", async (_req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, history, error } = parseChatBody(req.body);
+    const { message, history, sessionId, error } = parseChatBody(req.body);
     if (error) {
       return res.status(400).json({ error });
     }
@@ -859,7 +870,7 @@ app.post("/api/chat", async (req, res) => {
       langfuse?.flushAsync().catch(() => {});
       return res.json(crisis);
     }
-    trace?.update({ input: message });
+    trace?.update({ input: message, sessionId: sessionId || undefined });
 
     const rag = await ragPromise;
     if (rag instanceof Error) throw rag;
@@ -904,7 +915,7 @@ app.post("/api/chat", async (req, res) => {
 
 app.post("/api/chat/stream", async (req, res) => {
   try {
-    const { message, history, error } = parseChatBody(req.body);
+    const { message, history, sessionId, error } = parseChatBody(req.body);
     if (error) {
       return res.status(400).json({ error });
     }
@@ -932,7 +943,7 @@ app.post("/api/chat/stream", async (req, res) => {
       send({ done: true });
       return res.end();
     }
-    trace?.update({ input: message });
+    trace?.update({ input: message, sessionId: sessionId || undefined });
 
     const rag = await ragPromise;
     if (rag instanceof Error) throw rag;

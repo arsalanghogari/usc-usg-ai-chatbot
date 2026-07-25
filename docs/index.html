@@ -294,6 +294,44 @@
       border-color: var(--cardinal);
     }
 
+    .fb-comment {
+      margin-top: 6px;
+      width: 90%;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    .fb-thanks {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .beta-pill {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: var(--gold);
+      color: #2a2a2a;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      vertical-align: 2px;
+    }
+
+    .suggest-link {
+      font-size: 11px;
+      margin-top: 6px;
+    }
+
+    .suggest-link a {
+      color: var(--muted);
+      text-decoration: underline;
+    }
+
     .sources-label {
       margin-top: 6px;
       font-weight: 700;
@@ -485,7 +523,7 @@
             <img src="tommy.png" alt="Chat avatar" class="avatar-img" />
           </div>
           <div class="chat-title-wrap">
-            <h1 class="chat-title" id="chatTitle">Ask USG</h1>
+            <h1 class="chat-title" id="chatTitle">Ask USG<span class="beta-pill">BETA</span></h1>
             <p class="chat-subtitle">USC Undergraduate Student Government</p>
           </div>
         </div>
@@ -500,6 +538,9 @@
           <button id="send">Send</button>
         </div>
         <div class="status" id="status"></div>
+        <div class="suggest-link" id="suggestLink" hidden>
+          <a href="#" target="_blank" rel="noopener noreferrer">Beta feedback &amp; feature suggestions</a>
+        </div>
       </div>
     </div>
   </div>
@@ -509,6 +550,14 @@
     const API = ["localhost", "127.0.0.1"].includes(location.hostname)
       ? "/api/chat"
       : "https://usg-chat-backend.onrender.com/api/chat";
+    // beta feature-suggestion form; link renders only when set
+    const FEEDBACK_FORM_URL = "";
+    // anonymous per-tab session id -> groups traces into conversations
+    let SID = sessionStorage.getItem("usg_sid");
+    if (!SID) {
+      SID = crypto.randomUUID();
+      sessionStorage.setItem("usg_sid", SID);
+    }
     const MODE = new URLSearchParams(location.search).get("embed") || "bubble";
     document.body.classList.add(`mode-${MODE}`);
     const launcher = document.getElementById("launcher");
@@ -595,7 +644,19 @@
       if (e.key === "Escape") closeChat();
     });
 
+    // welcome message: beta users need to know what to ask
+    appendMessage(
+      "bot",
+      "Hi! I'm **Ask USG** — I answer questions about USC's Undergraduate Student Government using the USG website and live data.\n\nTry asking:\n- *How do I get funding for my club event?*\n- *What is USG working on right now?*\n- *When is the next senate meeting?*\n\nI'm in **beta** — use 👍/👎 on answers to help us improve, and double-check anything time-sensitive against the linked sources."
+    );
+
     if (MODE === "panel") openChat();
+
+    if (FEEDBACK_FORM_URL) {
+      const s = document.getElementById("suggestLink");
+      s.querySelector("a").href = FEEDBACK_FORM_URL;
+      s.hidden = false;
+    }
 
     async function sendMessage() {
       const text = q.value.trim();
@@ -621,7 +682,7 @@
         const r = await fetch(API + "/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, history: recentHistory })
+          body: JSON.stringify({ message: text, history: recentHistory, sessionId: SID })
         });
 
         if (!r.ok || !(r.headers.get("content-type") || "").includes("text/event-stream")) {
@@ -696,6 +757,26 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ traceId: finalTraceId, value })
               }).catch(() => {});
+              // on 👎, invite an optional one-line explanation
+              if (value === 0) {
+                const inp = document.createElement("input");
+                inp.className = "fb-comment";
+                inp.placeholder = "What went wrong? (optional — press Enter)";
+                inp.maxLength = 300;
+                inp.addEventListener("keydown", (ev) => {
+                  if (ev.key !== "Enter" || !inp.value.trim()) return;
+                  fetch(API.replace(/\/chat$/, "/feedback"), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ traceId: finalTraceId, value, comment: inp.value.trim() })
+                  }).catch(() => {});
+                  inp.replaceWith(Object.assign(document.createElement("div"), {
+                    className: "fb-thanks", textContent: "Thanks — this helps us improve."
+                  }));
+                });
+                fb.after(inp);
+                inp.focus();
+              }
             });
             fb.appendChild(b);
           });
