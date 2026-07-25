@@ -381,6 +381,10 @@ async function crisisPayload(message, history) {
     ],
   });
 
+  // count-only safety metric: no message content ever reaches analytics
+  langfuse?.trace({ name: "crisis", tags: ["crisis"] });
+  langfuse?.flushAsync().catch(() => {});
+
   const answer = crisisResponse.output_text || pickCrisisReply(message);
   return {
     crisis: true,
@@ -466,6 +470,7 @@ async function routeTool(message, history, trace) {
         { get_upcoming_events: "events", get_project_tracker: "tracker" }[call?.name] || "kb",
       args,
     };
+    trace?.update({ tags: [route.tool] }); // dashboard slicing by route
     trace?.span({
       name: "route",
       startTime: t,
@@ -796,6 +801,17 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+// Thumbs up/down from the widget -> Langfuse score on the answer's trace.
+app.post("/api/feedback", (req, res) => {
+  const { traceId, value } = req.body || {};
+  if (!langfuse || typeof traceId !== "string" || ![0, 1].includes(value)) {
+    return res.json({ ok: false });
+  }
+  langfuse.score({ traceId, name: "user_feedback", value });
+  langfuse.flushAsync().catch(() => {});
+  res.json({ ok: true });
+});
+
 // Which DB is this instance actually talking to? (diagnostic — host is
 // masked to a prefix, no credentials)
 app.get("/health/db", async (_req, res) => {
@@ -858,6 +874,7 @@ app.post("/api/chat", async (req, res) => {
       answer,
       sources,
       crisis: false,
+      traceId: trace?.id || null,
     });
   } catch (err) {
     console.error(err);
@@ -935,7 +952,7 @@ app.post("/api/chat/stream", async (req, res) => {
     trace?.update({ output: full + notice });
     langfuse?.flushAsync().catch(() => {});
 
-    send({ done: true, sources, notice, crisis: false });
+    send({ done: true, sources, notice, crisis: false, traceId: trace?.id || null });
     res.end();
   } catch (err) {
     if (err.name === "AbortError") return res.end();

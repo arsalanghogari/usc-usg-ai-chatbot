@@ -263,6 +263,37 @@
       color: var(--muted);
     }
 
+    .feedback {
+      margin-top: 6px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .feedback button {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 10px;
+      padding: 2px 8px;
+      font-size: 13px;
+      cursor: pointer;
+      opacity: 0.75;
+    }
+
+    .feedback button:hover {
+      opacity: 1;
+      border-color: var(--cardinal);
+    }
+
+    .feedback.done button {
+      cursor: default;
+      opacity: 0.35;
+    }
+
+    .feedback.done button.picked {
+      opacity: 1;
+      border-color: var(--cardinal);
+    }
+
     .sources-label {
       margin-top: 6px;
       font-weight: 700;
@@ -612,6 +643,7 @@
         let buf = "";
         let full = "";
         let finalSources = [];
+        let finalTraceId = null;
         let streamError = null;
 
         const render = () => {
@@ -638,6 +670,7 @@
             } else if (ev.done) {
               full += ev.notice || "";
               finalSources = ev.sources || finalSources;
+              finalTraceId = ev.traceId || null;
             } else if (ev.error) {
               streamError = ev.error;
             }
@@ -645,6 +678,29 @@
         }
 
         if (streamError && !full) throw new Error(streamError);
+
+        // thumbs feedback -> /api/feedback -> Langfuse score (skip crisis)
+        if (finalTraceId) {
+          const fb = document.createElement("div");
+          fb.className = "feedback";
+          [["👍", 1], ["👎", 0]].forEach(([label, value]) => {
+            const b = document.createElement("button");
+            b.textContent = label;
+            b.setAttribute("aria-label", value ? "Helpful" : "Not helpful");
+            b.addEventListener("click", () => {
+              if (fb.classList.contains("done")) return;
+              fb.classList.add("done");
+              b.classList.add("picked");
+              fetch(API.replace(/\/chat$/, "/feedback"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ traceId: finalTraceId, value })
+              }).catch(() => {});
+            });
+            fb.appendChild(b);
+          });
+          wrap.appendChild(fb);
+        }
 
         full = full.replace(/\[source:(.*?)\|(.*?)\]/g, "").trim();
         render();
