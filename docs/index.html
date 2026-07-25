@@ -740,42 +740,56 @@
 
         if (streamError && !full) throw new Error(streamError);
 
-        // thumbs feedback -> /api/feedback -> Langfuse score (skip crisis)
+        // thumbs feedback -> /api/feedback -> Langfuse score (skip crisis).
+        // Selection is changeable; the server upserts one score per trace.
         if (finalTraceId) {
           const fb = document.createElement("div");
           fb.className = "feedback";
+          let picked = null;
+          let comment = "";
+          let inp = null;
+          const post = () =>
+            fetch(API.replace(/\/chat$/, "/feedback"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                traceId: finalTraceId,
+                value: picked,
+                comment: comment || undefined
+              })
+            }).catch(() => {});
+          const buttons = {};
           [["👍", 1], ["👎", 0]].forEach(([label, value]) => {
             const b = document.createElement("button");
             b.textContent = label;
             b.setAttribute("aria-label", value ? "Helpful" : "Not helpful");
+            buttons[value] = b;
             b.addEventListener("click", () => {
-              if (fb.classList.contains("done")) return;
+              if (picked === value) return; // same choice, nothing to do
+              picked = value;
               fb.classList.add("done");
-              b.classList.add("picked");
-              fetch(API.replace(/\/chat$/, "/feedback"), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ traceId: finalTraceId, value })
-              }).catch(() => {});
-              // on 👎, invite an optional one-line explanation
-              if (value === 0) {
-                const inp = document.createElement("input");
+              buttons[1].classList.toggle("picked", value === 1);
+              buttons[0].classList.toggle("picked", value === 0);
+              post();
+              if (value === 0 && !inp) {
+                inp = document.createElement("input");
                 inp.className = "fb-comment";
                 inp.placeholder = "What went wrong? (optional — press Enter)";
                 inp.maxLength = 300;
                 inp.addEventListener("keydown", (ev) => {
                   if (ev.key !== "Enter" || !inp.value.trim()) return;
-                  fetch(API.replace(/\/chat$/, "/feedback"), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ traceId: finalTraceId, value, comment: inp.value.trim() })
-                  }).catch(() => {});
+                  comment = inp.value.trim();
+                  post();
                   inp.replaceWith(Object.assign(document.createElement("div"), {
                     className: "fb-thanks", textContent: "Thanks — this helps us improve."
                   }));
+                  inp = null;
                 });
                 fb.after(inp);
                 inp.focus();
+              } else if (value === 1 && inp) {
+                inp.remove();
+                inp = null;
               }
             });
             fb.appendChild(b);

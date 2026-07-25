@@ -827,6 +827,9 @@ app.post("/api/feedback", (req, res) => {
     return res.json({ ok: false });
   }
   langfuse.score({
+    // stable id -> re-submissions (changed mind, added comment) upsert the
+    // same score instead of double-counting
+    id: `fb-${traceId}`,
     traceId,
     name: "user_feedback",
     value,
