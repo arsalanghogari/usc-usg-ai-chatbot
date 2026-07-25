@@ -381,10 +381,6 @@ async function crisisPayload(message, history) {
     ],
   });
 
-  // count-only safety metric: no message content ever reaches analytics
-  langfuse?.trace({ name: "crisis", tags: ["crisis"] });
-  langfuse?.flushAsync().catch(() => {});
-
   const answer = crisisResponse.output_text || pickCrisisReply(message);
   return {
     crisis: true,
@@ -475,7 +471,9 @@ async function routeTool(message, history, trace) {
       name: "route",
       startTime: t,
       endTime: new Date(),
-      output: route,
+      // tool name only — args can echo the raw user message, and this
+      // span may belong to a trace that turns out to be a crisis request
+      output: { tool: route.tool },
       metadata: { model: ROUTER_MODEL },
     });
     return route;
@@ -836,10 +834,17 @@ app.post("/api/chat", async (req, res) => {
 
     // Crisis check and retrieval run concurrently; the crisis verdict still
     // gates the response — nothing is sent until it resolves.
-    const trace = langfuse?.trace({ name: "chat", input: message });
+    // Trace starts contentless — crisis message text must never reach
+    // analytics; input attaches only after the crisis check clears.
+    const trace = langfuse?.trace({ name: "chat" });
     const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
     const crisis = await crisisPayload(message, history);
-    if (crisis) return res.json(crisis);
+    if (crisis) {
+      trace?.update({ name: "crisis", tags: ["crisis"] }); // count-only
+      langfuse?.flushAsync().catch(() => {});
+      return res.json(crisis);
+    }
+    trace?.update({ input: message });
 
     const rag = await ragPromise;
     if (rag instanceof Error) throw rag;
@@ -901,14 +906,18 @@ app.post("/api/chat/stream", async (req, res) => {
     // Crisis answers are generated and guardrail-checked in full, then sent
     // as one event — never token-streamed. The check runs concurrently with
     // retrieval but always resolves before the first token goes out.
-    const trace = langfuse?.trace({ name: "chat-stream", input: message });
+    // Contentless until the crisis check clears — see /api/chat.
+    const trace = langfuse?.trace({ name: "chat-stream" });
     const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
     const crisis = await crisisPayload(message, history);
     if (crisis) {
+      trace?.update({ name: "crisis", tags: ["crisis"] }); // count-only
+      langfuse?.flushAsync().catch(() => {});
       send(crisis);
       send({ done: true });
       return res.end();
     }
+    trace?.update({ input: message });
 
     const rag = await ragPromise;
     if (rag instanceof Error) throw rag;
