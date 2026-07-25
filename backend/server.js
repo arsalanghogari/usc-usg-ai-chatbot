@@ -55,12 +55,27 @@ const RERANK_CANDIDATES = 20;
 // body for Cohere Rerank (cross-encoder) if a COHERE_API_KEY ever lands
 async function rerank(query, candidates, k = 4) {
   if (candidates.length <= k) return candidates;
+  // Query-aware snippet: center on the first query-term hit so evidence
+  // deeper in the chunk is visible to the reranker (a name at char 502
+  // was invisible to a plain 500-char head slice).
+  const terms = query.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+  const snippet = (text, len = 500) => {
+    const hay = text.toLowerCase();
+    let pos = -1;
+    for (const t of terms) {
+      const i = hay.indexOf(t);
+      if (i !== -1 && (pos === -1 || i < pos)) pos = i;
+    }
+    if (pos <= len / 2) return text.slice(0, len);
+    const start = Math.max(0, pos - Math.floor(len / 2));
+    return text.slice(start, start + len);
+  };
   const list = candidates
     .map(
       (c, i) =>
         `[${i}] (${c.source_title}` +
         (c.source_modified ? `, updated ${String(c.source_modified).slice(0, 10)}` : "") +
-        `) ${c.text.slice(0, 500)}`
+        `) ${snippet(c.text)}`
     )
     .join("\n\n");
   try {
