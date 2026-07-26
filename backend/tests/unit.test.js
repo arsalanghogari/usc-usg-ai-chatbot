@@ -85,13 +85,37 @@ test("parseIcsDate", () => {
 
 test("expandSiblings pulls whole pages in order, keeps picked scores", async () => {
   const { expandSiblings, loadKb } = require("../server.js");
-  const chunks = loadKb().chunks;
-  const programming = chunks.filter((c) => c.source_url.endsWith("/branches/programming/"));
-  const pick = { ...programming[3], score: 0.91 };
+  // kb.json is not committed; CI may have none yet (integration's fixture
+  // writes in its own before hook) — write the same tiny fixture if absent.
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const kbPath = path.join(__dirname, "..", "kb.json");
+  if (!fs.existsSync(kbPath)) {
+    fs.writeFileSync(
+      kbPath,
+      JSON.stringify({
+        chunks: [0, 1].map((i) => ({
+          source_url: "https://usg.usc.edu/branches/funding/",
+          source_title: "USG Funding Department",
+          chunk_index: i,
+          text: `Funding fixture chunk ${i}`,
+          evergreen: true,
+          embedding: Array(1536).fill(0.1),
+        })),
+      })
+    );
+  }
+  // use any multi-chunk page so the test works on real KB and fixture alike
+  const byUrl = {};
+  for (const c of loadKb().chunks) (byUrl[c.source_url] ||= []).push(c);
+  const page = Object.values(byUrl)
+    .find((p) => p.length >= 2)
+    .sort((a, b) => a.chunk_index - b.chunk_index);
+  const pick = { ...page[page.length - 1], score: 0.91 };
   delete pick.embedding;
   const out = await expandSiblings([pick]);
-  assert.equal(out.length, programming.length); // whole page came back
-  assert.deepEqual(out.map((c) => c.chunk_index), programming.map((c) => c.chunk_index).sort((a, b) => a - b));
+  assert.equal(out.length, page.length); // whole page came back
+  assert.deepEqual(out.map((c) => c.chunk_index), page.map((c) => c.chunk_index));
   assert.equal(out.find((c) => c.chunk_index === pick.chunk_index).score, 0.91);
   assert.ok(out.every((c) => !c.embedding)); // no embeddings leaked into context
 });
