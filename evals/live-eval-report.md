@@ -9,10 +9,15 @@
 | Baseline | w1–w4 (526 answers) | **83.7%** |
 | + prompt guard, senate schedule line | w5 (133) | 83.5% raw / 85.7% corrected* |
 | + Google Calendar ICS events source | — | (verified in prod; no full wave) |
-| + sibling-chunk retrieval expansion | w6 (133) | **94.7%** |
+| + sibling-chunk retrieval expansion | w6 (133) | 94.7% |
+| same config, confirmation runs | w6–w9 pooled (526) | **92.4%** |
 
 \* 3 of w5's downs were the judge flagging the deliberately-injected (and
 corpus-verified) senate schedule line; the rubric now exempts it.
+
+**The quotable pair**: 83.7% baseline → **92.4% positive across 526 rated
+answers** at the shipped config (waves 6–9: 94.7 / 91.7 / 92.1 / 91.0 — stable).
+Cumulative campaign: 1,187 merit-rated answers, all tagged `syn-eval-*`.
 
 The big lever was **sibling-chunk expansion** (rerank picks 4 chunks; roster/
 list pages span 8–12, so completeness was structurally impossible). It fixed
