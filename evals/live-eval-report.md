@@ -1,6 +1,32 @@
 # Ask USG — Live Synthetic Eval Report
 
-**2026-07-25 · 526 rated answers · 4 waves · live production stack**
+**2026-07-25/26 · 792 rated answers · 6 waves · live production stack**
+
+## Fix trajectory (added 07-26)
+
+| Config | Wave | Positive rate |
+|---|---|---|
+| Baseline | w1–w4 (526 answers) | **83.7%** |
+| + prompt guard, senate schedule line | w5 (133) | 83.5% raw / 85.7% corrected* |
+| + Google Calendar ICS events source | — | (verified in prod; no full wave) |
+| + sibling-chunk retrieval expansion | w6 (133) | **94.7%** |
+
+\* 3 of w5's downs were the judge flagging the deliberately-injected (and
+corpus-verified) senate schedule line; the rubric now exempts it.
+
+The big lever was **sibling-chunk expansion** (rerank picks 4 chunks; roster/
+list pages span 8–12, so completeness was structurally impossible). It fixed
+the incompleteness cluster and, as a side effect, most "unsupported specifics"
+flags — with whole pages in context, the model stops filling gaps.
+
+Remaining 7 downs in w6 are a mix of judge-visibility artifacts and two real
+nits: ambiguous-followup handling ("what have *they* accomplished") and
+new-vs-current senator disambiguation (blocked on the exec/team page revamp
+planned for the school year).
+
+---
+
+*Original baseline report below (waves 1–4).*
 
 ## Headline
 
