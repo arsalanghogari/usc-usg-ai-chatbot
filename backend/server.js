@@ -412,12 +412,12 @@ async function crisisPayload(message, history) {
 
 // ---- Agentic routing: KB retrieval vs live events calendar ---------------
 
-const WP_EVENTS_API =
-  process.env.WP_EVENTS_API || "https://usg.usc.edu/wp-json/tribe/events/v1";
+// The USG Google Calendar's public ICS feed — the WP events plugin lags it,
+// so this is the source of truth (per USG).
+const CALENDAR_ICS_URL =
+  process.env.CALENDAR_ICS_URL ||
+  "https://calendar.google.com/calendar/ical/c_d7f460dc8f52e6585e9f22d9c8ea8cf81f2236af9ca4c120545f0703ae90d7ea%40group.calendar.google.com/public/basic.ics";
 const ROUTER_MODEL = process.env.ROUTER_MODEL || "gpt-5.4-mini";
-const BROWSER_UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
 const AGENT_TOOLS = [
   {
     type: "function",
@@ -504,6 +504,90 @@ async function routeTool(message, history, trace) {
   }
 }
 
+// Minimal ICS parse for the public Google Calendar feed. Handles the three
+// date shapes Google emits (UTC "Z", TZID=America/Los_Angeles, all-day) and
+// expands FREQ=WEEKLY recurrences (the USG Senate event) by stepping 7 days
+// from DTSTART — day-of-week survives any timezone, so no BYDAY math needed.
+// ponytail: weekly-only expansion; add other FREQs if the calendar ever uses them.
+function parseIcsDate(raw) {
+  // raw like "DTSTART;TZID=America/Los_Angeles:20260113T190000" or
+  // "DTSTART:20251106T013000Z" or "DTSTART;VALUE=DATE:20251106"
+  const m = raw.match(/:(\d{8})(T(\d{6}))?(Z?)$/);
+  if (!m) return null;
+  const [y, mo, d] = [m[1].slice(0, 4), m[1].slice(4, 6), m[1].slice(6, 8)];
+  if (!m[2])
+    return { epoch: Date.parse(`${y}-${mo}-${d}T12:00:00Z`), tod: null, display: `${y}-${mo}-${d} (all day)` };
+  const [hh, mm] = [m[3].slice(0, 2), m[3].slice(2, 4)];
+  let epoch, tod;
+  if (m[4] === "Z") {
+    epoch = Date.parse(`${y}-${mo}-${d}T${hh}:${mm}:00Z`);
+    tod = new Date(epoch).toLocaleString("en-US", {
+      timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit",
+    });
+  } else {
+    // TZID local wall-clock time: display verbatim; epoch approximated with a
+    // fixed -07:00 (only used for ordering/future-filtering, never shown)
+    epoch = Date.parse(`${y}-${mo}-${d}T${hh}:${mm}:00-07:00`);
+    tod = `${((Number(hh) + 11) % 12) + 1}:${mm} ${Number(hh) >= 12 ? "PM" : "AM"}`;
+  }
+  const datePart = new Date(epoch).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles", weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+  return { epoch, tod, display: `${datePart}, ${tod}` };
+}
+
+let icsCache = { t: 0, events: [] };
+async function fetchIcsEvents() {
+  if (Date.now() - icsCache.t < 5 * 60 * 1000) return icsCache.events;
+  const r = await fetch(CALENDAR_ICS_URL, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`ICS fetch ${r.status}`);
+  const text = (await r.text()).replace(/\r/g, "").replace(/\n[ \t]/g, ""); // strip CR, unfold folded lines
+  const now = Date.now();
+  const horizon = now + 90 * 24 * 3600 * 1000;
+  const out = [];
+  for (const block of text.split("BEGIN:VEVENT").slice(1)) {
+    const field = (name) => (block.match(new RegExp("^" + name + "[^\\n]*", "m")) || [null])[0];
+    const title = (field("SUMMARY")?.replace(/^SUMMARY:/, "") || "").replace(/\\,/g, ",").trim();
+    const location = (field("LOCATION")?.replace(/^LOCATION:/, "") || "").replace(/\\,/g, ",").trim() || null;
+    const start = field("DTSTART") && parseIcsDate(field("DTSTART"));
+    if (!title || !start) continue;
+    const rrule = field("RRULE");
+    if (rrule && /FREQ=WEEKLY/.test(rrule)) {
+      const untilM = rrule.match(/UNTIL=(\d{8}T\d{6}Z)/);
+      const until = untilM
+        ? Date.parse(untilM[1].replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/, "$1-$2-$3T$4:$5:$6Z"))
+        : Infinity;
+      const exdates = new Set(
+        [...block.matchAll(/^EXDATE[^\n]*/gm)].map((x) => parseIcsDate(x[0])?.epoch)
+      );
+      const week = 7 * 24 * 3600 * 1000;
+      let occ = start.epoch + Math.max(0, Math.ceil((now - start.epoch) / week)) * week;
+      for (let n = 0; occ <= Math.min(until, horizon) && n < 3; occ += week) {
+        if (exdates.has(occ)) continue;
+        const datePart = new Date(occ).toLocaleString("en-US", {
+          timeZone: "America/Los_Angeles", weekday: "long", year: "numeric", month: "long", day: "numeric",
+        });
+        // weekly recurrence keeps the same local wall-clock time, so reuse
+        // DTSTART's time-of-day rather than epoch math (avoids DST drift)
+        out.push({
+          title,
+          start: start.tod ? `${datePart}, ${start.tod}` : datePart,
+          venue: location,
+          recurring: "weekly",
+          _epoch: occ,
+        });
+        n++;
+      }
+    } else if (start.epoch >= now && start.epoch <= horizon) {
+      out.push({ title, start: start.display, venue: location, recurring: null, _epoch: start.epoch });
+    }
+  }
+  out.sort((a, b) => a._epoch - b._epoch);
+  for (const e of out) delete e._epoch;
+  icsCache = { t: Date.now(), events: out };
+  return out;
+}
+
 // Live-events counterpart of ragPrepare: same return shape, so both
 // endpoints treat the two paths identically.
 async function eventsPrepare(message, args, trace) {
@@ -511,25 +595,17 @@ async function eventsPrepare(message, args, trace) {
   const today = new Date().toISOString().slice(0, 10);
 
   async function fetchEvents(search) {
-    const params = new URLSearchParams({ per_page: "10", start_date: today });
-    if (search) params.set("search", search);
-    const r = await fetch(`${WP_EVENTS_API}/events?${params}`, {
-      headers: { "User-Agent": BROWSER_UA },
-    });
-    if (!r.ok) return [];
-    return ((await r.json()).events || []).map((e) => ({
-      title: e.title,
-      start: e.start_date,
-      end: e.end_date,
-      venue: e.venue?.venue || null,
-      url: e.url,
-    }));
+    let events = await fetchIcsEvents();
+    if (search) {
+      const hit = events.filter((e) => e.title.toLowerCase().includes(search.toLowerCase()));
+      if (hit.length) events = hit;
+    }
+    return events.slice(0, 10);
   }
 
   let events = [];
   try {
     events = await fetchEvents(args?.search);
-    if (!events.length && args?.search) events = await fetchEvents(null);
   } catch (e) {
     console.warn("events fetch failed:", e.message);
   }
@@ -1064,6 +1140,8 @@ module.exports = {
   parseChatBody,
   routeTool,
   eventsPrepare,
+  fetchIcsEvents,
+  parseIcsDate,
   agentGraph,
   pool,
 };

@@ -14,6 +14,7 @@ const {
   assessFreshness,
   dedupSources,
   parseChatBody,
+  parseIcsDate,
 } = require("../server.js");
 
 test("cosineSimilarity", () => {
@@ -66,4 +67,18 @@ test("parseChatBody", () => {
   });
   assert.equal(ok.message, "hi");
   assert.deepEqual(ok.history, [{ role: "user", content: "q" }]);
+});
+
+test("parseIcsDate", () => {
+  // TZID local wall-clock (senate meeting shape)
+  const tz = parseIcsDate("DTSTART;TZID=America/Los_Angeles:20250826T190000");
+  assert.equal(tz.tod, "7:00 PM");
+  assert.ok(tz.display.includes("Tuesday, August 26, 2025, 7:00 PM"));
+  // UTC Z shape converts to LA time
+  const z = parseIcsDate("DTSTART:20251106T013000Z");
+  assert.equal(z.tod, "5:30 PM");
+  // all-day
+  assert.ok(parseIcsDate("DTSTART;VALUE=DATE:20251106").display.includes("all day"));
+  // garbage
+  assert.equal(parseIcsDate("DTSTART:nope"), null);
 });
