@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+// STANDBY — not currently scheduled (simulations would pollute the archive;
+// re-add the feedback-export job to ingest.yml to enable).
 // Archives Langfuse user_feedback scores (+ their trace's question, route,
 // session) into Postgres before Langfuse's 30-day free-tier window drops
-// them. Runs weekly in CI; idempotent upserts. The repo is public, so this
-// user-written content lives in the private DB, never in git.
+// them. Idempotent upserts. The repo is public, so this user-written
+// content lives in the private DB, never in git.
 require("dotenv").config();
 const { Pool } = require("pg");
 

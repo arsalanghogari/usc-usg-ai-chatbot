@@ -32,23 +32,8 @@ jobs:
 # ingestion step upserts via SUPABASE_DB_URL) and at full-site scale the
 # file would bloat git history by ~15 MB per weekly run.
 
-  # Langfuse free tier only keeps 30 days of data — archive user feedback
-  # (scores, comments, questions) to the private Postgres weekly.
-  feedback-export:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - run: npm ci
-        working-directory: backend
-      - name: Archive Langfuse feedback to Postgres
-        env:
-          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: node export-feedback.js
-        working-directory: backend
+  # STANDBY: backend/export-feedback.js archives Langfuse feedback to the
+  # private Postgres (free tier drops data after 30 days). Deliberately not
+  # scheduled yet — simulation traffic would pollute the archive. To enable
+  # after the beta goes live to real users, restore the feedback-export job
+  # (git log for this file has it) with LANGFUSE_* + SUPABASE_DB_URL secrets.
