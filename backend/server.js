@@ -96,6 +96,48 @@ async function rerank(query, candidates, k = 4) {
   }
 }
 
+// Rerank picks 4 chunks, but roster/list pages span 8-12 — so answers built
+// from picks alone are structurally incomplete. After rerank, pull the
+// remaining chunks of each picked page (page order preserved, char-budgeted)
+// so lists arrive whole.
+const SIBLING_BUDGET = Number(process.env.SIBLING_BUDGET_CHARS) || 32000;
+async function expandSiblings(matches) {
+  try {
+    const urls = [...new Set(matches.map((m) => m.source_url))];
+    let all;
+    if (pool) {
+      ({ rows: all } = await pool.query(
+        `select source_url, source_title, chunk_index, text,
+                source_modified::text as source_modified,
+                source_modified_year, evergreen
+         from chunks where source_url = any($1)`,
+        [urls]
+      ));
+    } else {
+      all = loadKb().chunks.map(({ embedding, ...c }) => c).filter((c) => urls.includes(c.source_url));
+    }
+    const picked = new Map(matches.map((m) => [m.source_url + "#" + m.chunk_index, m]));
+    let used = matches.reduce((s, m) => s + m.text.length, 0);
+    const out = [];
+    for (const url of urls) {
+      const page = all.filter((c) => c.source_url === url).sort((a, b) => a.chunk_index - b.chunk_index);
+      for (const c of page) {
+        const hit = picked.get(c.source_url + "#" + c.chunk_index);
+        if (hit) {
+          out.push(hit);
+        } else if (used + c.text.length <= SIBLING_BUDGET) {
+          out.push({ ...c, score: 0 }); // real score lives on the picked chunk; dedupSources keeps max
+          used += c.text.length;
+        }
+      }
+    }
+    return out;
+  } catch (e) {
+    console.warn("sibling expansion failed, using picks:", e.message);
+    return matches;
+  }
+}
+
 async function topChunksDb(queryEmbedding, k = 4) {
   const vec = `[${queryEmbedding.join(",")}]`;
   const { rows } = await pool.query(
@@ -861,6 +903,15 @@ async function ragPrepare(message, trace) {
     });
   }
 
+  t = new Date();
+  matches = await expandSiblings(matches);
+  trace?.span({
+    name: "expand_siblings",
+    startTime: t,
+    endTime: new Date(),
+    output: { chunks: matches.length, chars: matches.reduce((s, m) => s + m.text.length, 0) },
+  });
+
   const today = new Date().toISOString().slice(0, 10);
   const context = matches
     .map(
@@ -1142,6 +1193,7 @@ module.exports = {
   eventsPrepare,
   fetchIcsEvents,
   parseIcsDate,
+  expandSiblings,
   agentGraph,
   pool,
 };

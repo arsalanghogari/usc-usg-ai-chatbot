@@ -82,3 +82,16 @@ test("parseIcsDate", () => {
   // garbage
   assert.equal(parseIcsDate("DTSTART:nope"), null);
 });
+
+test("expandSiblings pulls whole pages in order, keeps picked scores", async () => {
+  const { expandSiblings, loadKb } = require("../server.js");
+  const chunks = loadKb().chunks;
+  const programming = chunks.filter((c) => c.source_url.endsWith("/branches/programming/"));
+  const pick = { ...programming[3], score: 0.91 };
+  delete pick.embedding;
+  const out = await expandSiblings([pick]);
+  assert.equal(out.length, programming.length); // whole page came back
+  assert.deepEqual(out.map((c) => c.chunk_index), programming.map((c) => c.chunk_index).sort((a, b) => a - b));
+  assert.equal(out.find((c) => c.chunk_index === pick.chunk_index).score, 0.91);
+  assert.ok(out.every((c) => !c.embedding)); // no embeddings leaked into context
+});
