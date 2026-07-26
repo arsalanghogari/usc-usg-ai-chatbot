@@ -548,6 +548,10 @@ async function eventsPrepare(message, args, trace) {
 
         If the list is empty, say the calendar lookup found nothing (or the calendar couldn't be reached) and point the user to the calendar page instead of guessing.
 
+        If the user asks about Senate meetings and none appear in the list, add that during the academic year the USG Senate meets every Tuesday at 7:00 p.m. in TCC 450 (Tutor Forum) with an open forum at every meeting, and suggest confirming on the calendar once the semester schedule is posted.
+
+        When linking the calendar, use exactly https://usg.usc.edu/calendar/ .
+
         Be concise, accurate, and human.
       `;
   const userContent = `Live upcoming USG events (fetched just now):\n${JSON.stringify(events, null, 1)}\n\nCurrent user message:\n${message}`;
@@ -802,7 +806,7 @@ async function ragPrepare(message, trace) {
 
         Keep the conversation natural and context-aware.
 
-        Use the knowledge base for factual USC/USG information. State only facts found in the context — do not fill gaps from general knowledge, and do not attribute to a resource anything the context does not say about it.
+        Use the knowledge base for factual USC/USG information. State only facts found in the context — do not fill gaps from general knowledge, and do not attribute to a resource anything the context does not say about it. In particular, never give an email address, phone number, meeting time, room/location, dollar amount, deadline, URL, or person's name/title unless it appears in the context — a plausible guess at a contact detail is worse than none. If asked for a specific detail the context lacks, say you don't have it and link the most relevant USG page instead.
 
         If the knowledge base truly does not contain enough information, say so plainly.
 
