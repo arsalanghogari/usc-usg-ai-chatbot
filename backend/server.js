@@ -854,6 +854,30 @@ app.get("/health/db", async (_req, res) => {
   }
 });
 
+// Buffers span/generation/update calls until a real Langfuse trace exists.
+// Lets retrieval run (and instrument itself) concurrently with the crisis
+// check while the trace — with input + sessionId, which Langfuse only
+// honors at creation — is created strictly after the crisis verdict.
+// Crisis requests: buffer is discarded, zero events reach analytics.
+function deferredTrace() {
+  let real = null;
+  const q = [];
+  const fw = (m) => (o) => (real ? real[m](o) : q.push([m, o]));
+  return {
+    span: fw("span"),
+    generation: fw("generation"),
+    update: fw("update"),
+    attach(t) {
+      real = t;
+      for (const [m, o] of q) t[m](o);
+      q.length = 0;
+    },
+    get id() {
+      return real ? real.id : null;
+    },
+  };
+}
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, history, sessionId, error } = parseChatBody(req.body);
@@ -863,17 +887,20 @@ app.post("/api/chat", async (req, res) => {
 
     // Crisis check and retrieval run concurrently; the crisis verdict still
     // gates the response — nothing is sent until it resolves.
-    // Trace starts contentless — crisis message text must never reach
-    // analytics; input attaches only after the crisis check clears.
-    const trace = langfuse?.trace({ name: "chat" });
+    // Spans buffer locally; the real trace (with input + sessionId, which
+    // Langfuse only honors at creation) is created after the crisis check.
+    const trace = langfuse ? deferredTrace() : null;
     const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
     const crisis = await crisisPayload(message, history);
     if (crisis) {
-      trace?.update({ name: "crisis", tags: ["crisis"] }); // count-only
+      // count-only marker; the buffered spans are discarded
+      langfuse?.trace({ name: "crisis", tags: ["crisis"] });
       langfuse?.flushAsync().catch(() => {});
       return res.json(crisis);
     }
-    trace?.update({ input: message, sessionId: sessionId || undefined });
+    trace?.attach(
+      langfuse.trace({ name: "chat", input: message, sessionId: sessionId || undefined })
+    );
 
     const rag = await ragPromise;
     if (rag instanceof Error) throw rag;
@@ -935,18 +962,20 @@ app.post("/api/chat/stream", async (req, res) => {
     // Crisis answers are generated and guardrail-checked in full, then sent
     // as one event — never token-streamed. The check runs concurrently with
     // retrieval but always resolves before the first token goes out.
-    // Contentless until the crisis check clears — see /api/chat.
-    const trace = langfuse?.trace({ name: "chat-stream" });
+    // Deferred like /api/chat: buffered spans, trace created post-verdict.
+    const trace = langfuse ? deferredTrace() : null;
     const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
     const crisis = await crisisPayload(message, history);
     if (crisis) {
-      trace?.update({ name: "crisis", tags: ["crisis"] }); // count-only
+      langfuse?.trace({ name: "crisis", tags: ["crisis"] }); // count-only
       langfuse?.flushAsync().catch(() => {});
       send(crisis);
       send({ done: true });
       return res.end();
     }
-    trace?.update({ input: message, sessionId: sessionId || undefined });
+    trace?.attach(
+      langfuse.trace({ name: "chat-stream", input: message, sessionId: sessionId || undefined })
+    );
 
     const rag = await ragPromise;
     if (rag instanceof Error) throw rag;
