@@ -31,3 +31,24 @@ jobs:
 # kb.json is no longer committed: Postgres is the store of record (the
 # ingestion step upserts via SUPABASE_DB_URL) and at full-site scale the
 # file would bloat git history by ~15 MB per weekly run.
+
+  # Langfuse free tier only keeps 30 days of data — archive user feedback
+  # (scores, comments, questions) to the private Postgres weekly.
+  feedback-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Archive Langfuse feedback to Postgres
+        env:
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: node export-feedback.js
+        working-directory: backend
