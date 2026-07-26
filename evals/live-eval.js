@@ -110,6 +110,7 @@ Otherwise rate 0 and be specific about the failure.
 Do NOT penalize: the trailing "⚠️ ..." staleness notice (it is a deliberate deterministic feature), hedging on time-sensitive facts, or offering the source links.
 Also do NOT penalize: "page last updated on <date>" claims (that date comes from page metadata the bot legitimately sees, even if not visible in the page text); when two cited pages conflict (e.g. an old blog vs a newer policy page), following the newer page is CORRECT, not a fabrication.
 If the cited source is the USG Events Calendar (usg.usc.edu/calendar) or the Live Project Tracker (legislative-branch page), the bot answered from a live data feed you cannot see — do NOT treat event or project specifics as fabricated for being absent from page text; judge only responsiveness, internal consistency, and usability.
+"The USG Senate meets every Tuesday at 7:00 p.m. in TCC 450 (Tutor Forum)" (with open forum) is a documented fact stated across many USG press releases — never count stating it as fabrication, regardless of which pages are cited.
 If page text is unavailable (null), judge (b) and (c) and note grounding was unverifiable — only rate 0 on grounding if the answer makes suspicious specific claims (names, dates, dollar amounts) for which no source was cited at all.
 
 Reply ONLY with JSON:
