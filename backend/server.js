@@ -24,7 +24,7 @@ if (!OPENAI_API_KEY) {
 }
 
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
-const KB_PATH = path.join(__dirname, "kb.json");
+const KB_PATH = process.env.KB_PATH || path.join(__dirname, "kb.json");
 
 // Postgres/pgvector retrieval when SUPABASE_DB_URL is set; kb.json fallback
 // otherwise so the app keeps working before the env var lands everywhere.
@@ -1186,6 +1186,11 @@ module.exports = {
   topChunksDb,
   assessFreshness,
   hasCrisisKeywords,
+  historySuggestsCrisis,
+  hasDisallowedAssistantLanguage,
+  isCrisisMessage,
+  pickCrisisReply,
+  CRISIS_REPLIES,
   cosineSimilarity,
   dedupSources,
   parseChatBody,

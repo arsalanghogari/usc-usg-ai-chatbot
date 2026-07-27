@@ -43,7 +43,7 @@ const mock = http.createServer((req, res) => {
   });
 });
 
-let app, api;
+let app, api, srv;
 
 before(async () => {
   // kb.json is not committed (Postgres is the store of record), so CI has
@@ -79,13 +79,17 @@ before(async () => {
   process.env.RERANK = "0"; // deterministic single-stage retrieval in tests
 
   app = require("../server.js").app;
-  const srv = app.listen(0);
+  srv = app.listen(0);
   api = `http://localhost:${srv.address().port}`;
 });
 
 after(() => {
+  // close handles instead of process.exit — exit() races the runner and
+  // silently drops the last declared test on node 25
+  srv.closeAllConnections?.();
+  srv.close();
+  mock.closeAllConnections?.();
   mock.close();
-  process.exit(0); // node:test keeps the express handle otherwise
 });
 
 async function chat(payload) {
