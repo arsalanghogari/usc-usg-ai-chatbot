@@ -69,6 +69,28 @@ test("parseChatBody", () => {
   assert.deepEqual(ok.history, [{ role: "user", content: "q" }]);
 });
 
+test("stripDisallowedUrls", () => {
+  const { stripDisallowedUrls } = require("../server.js");
+  // USC and calendar hosts pass through
+  assert.equal(
+    stripDisallowedUrls("see https://usg.usc.edu/funding/ and https://usc.edu/"),
+    "see https://usg.usc.edu/funding/ and https://usc.edu/"
+  );
+  assert.ok(stripDisallowedUrls("https://calendar.google.com/x").includes("calendar.google.com"));
+  // everything else is removed, including www. bare links and lookalike hosts
+  assert.equal(stripDisallowedUrls("go to https://evil.com/login now"), "go to [link removed] now");
+  assert.equal(stripDisallowedUrls("go to www.evil.com/login now"), "go to [link removed] now");
+  assert.equal(stripDisallowedUrls("https://usc.edu.evil.com/"), "[link removed]");
+  assert.equal(stripDisallowedUrls("https://notusc.edu/"), "[link removed]");
+  // stripping happens inside parseChatBody for message and history
+  const parsed = parseChatBody({
+    message: "click https://evil.com/a",
+    history: [{ role: "user", content: "https://evil.com/b" }],
+  });
+  assert.equal(parsed.message, "click [link removed]");
+  assert.equal(parsed.history[0].content, "[link removed]");
+});
+
 test("parseIcsDate", () => {
   // TZID local wall-clock (senate meeting shape)
   const tz = parseIcsDate("DTSTART;TZID=America/Los_Angeles:20250826T190000");
