@@ -508,6 +508,79 @@ function homeworkPrepare(trace) {
   return { direct: HOMEWORK_REPLY, sources: HOMEWORK_SOURCES, instructions: "", userContent: "", notice: "" };
 }
 
+// ---- Safety / reporting guardrail ----------------------------------------
+// Deterministic like crisis: a student reporting harassment, discrimination,
+// or violence gets verified contacts, never a generated (fabricatable)
+// process. Every number below is from usg.usc.edu/resources/emergencies/
+// (updated 03/05/26) — keep them in sync with that page.
+
+const SAFETY_REPLY =
+  "I'm sorry you're dealing with this. Here's where to get real help:\n\n" +
+  "- **If you're in immediate danger, call 911** or USC Dept. of Public Safety (24/7): **(213) 740-4321** (non-emergency: (213) 740-6000)\n" +
+  "- **Harassment, discrimination, or sexual violence**: USC's reporting form and support services are linked on USG's Emergencies page: https://usg.usc.edu/resources/emergencies/\n" +
+  "- **24/7 hotlines**: National Sexual Assault Hotline **1-800-656-4673** · National Domestic Violence Hotline **1-800-799-7233**\n\n" +
+  "That page also links counseling and crisis support — you don't have to navigate this alone.";
+
+const SAFETY_SOURCES = [
+  {
+    source_title: "Emergencies",
+    source_url: "https://usg.usc.edu/resources/emergencies/",
+    score: 1,
+    source_modified: null,
+    source_modified_year: null,
+    evergreen: true,
+  },
+];
+
+function safetyPrepare(trace) {
+  const t = new Date();
+  trace?.span({ name: "safety_redirect", startTime: t, endTime: new Date() });
+  return { direct: SAFETY_REPLY, sources: SAFETY_SOURCES, instructions: "", userContent: "", notice: "" };
+}
+
+// ---- Campus-office directory guardrail -----------------------------------
+// Questions that belong to another USC office get the office's official
+// site instead of a RAG answer (the eval's fabricated-office-hours cluster).
+// Stable top-level USC domains only.
+
+const DIRECTORY = {
+  housing: { name: "USC Housing", url: "https://housing.usc.edu" },
+  dining: { name: "USC Hospitality (dining)", url: "https://hospitality.usc.edu" },
+  financial_aid: { name: "USC Financial Aid", url: "https://financialaid.usc.edu" },
+  registrar: { name: "the USC Registrar", url: "https://registrar.usc.edu" },
+  transportation: { name: "USC Transportation (parking & permits)", url: "https://transnet.usc.edu" },
+  dps: { name: "the USC Department of Public Safety", url: "https://dps.usc.edu" },
+  gsg: { name: "the Graduate Student Government (GSG)", url: "https://gsg.usc.edu" },
+  health: { name: "USC Student Health", url: "https://studenthealth.usc.edu" },
+  international: { name: "the USC Office of International Services", url: "https://ois.usc.edu" },
+  it: { name: "USC IT Services", url: "https://itservices.usc.edu" },
+  other: { name: "USC Student Affairs' campus resources directory", url: "https://studentaffairs.usc.edu/campus-resources/" },
+};
+
+function directoryPrepare(args, trace) {
+  const t = new Date();
+  const office = DIRECTORY[args?.office] || DIRECTORY.other;
+  trace?.span({ name: "directory_redirect", startTime: t, endTime: new Date(), output: { office: args?.office } });
+  return {
+    direct:
+      `That one's handled by **${office.name}**, not USG — you'll find it at ${office.url}\n\n` +
+      "I only cover the Undergraduate Student Government, but I'm happy to help with anything USG-related!",
+    sources: [
+      {
+        source_title: office.name,
+        source_url: office.url,
+        score: 1,
+        source_modified: null,
+        source_modified_year: null,
+        evergreen: true,
+      },
+    ],
+    instructions: "",
+    userContent: "",
+    notice: "",
+  };
+}
+
 // ---- Agentic routing: KB retrieval vs live events calendar ---------------
 
 // The USG Google Calendar's public ICS feed — the WP events plugin lags it,
@@ -558,6 +631,49 @@ const AGENT_TOOLS = [
   },
   {
     type: "function",
+    name: "redirect_safety_report",
+    strict: true,
+    description:
+      "The user is reporting or seeking help with harassment, discrimination, sexual violence, assault, stalking, threats, a hate/bias incident, or feeling unsafe — or asking HOW to report one. Route here for verified emergency and reporting contacts. NOT for questions about USG's advocacy history, campaigns, or press releases on these topics — those go to the knowledge base.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "redirect_campus_office",
+    strict: true,
+    description:
+      "The user's question is really for another USC office, not USG: housing applications, dining/meal plans, financial aid, registrar/transcripts/enrollment, parking tickets & permits, DPS services, the graduate student government (GSG), Student Health appointments, international student/visa matters, or campus IT/wifi. Route here to point them at the right office. NOT for USG topics, and NOT for safety/reporting situations (use redirect_safety_report).",
+    parameters: {
+      type: "object",
+      properties: {
+        office: {
+          type: "string",
+          enum: [
+            "housing",
+            "dining",
+            "financial_aid",
+            "registrar",
+            "transportation",
+            "dps",
+            "gsg",
+            "health",
+            "international",
+            "it",
+            "other",
+          ],
+        },
+      },
+      required: ["office"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "get_upcoming_events",
     strict: true,
     description:
@@ -595,9 +711,13 @@ async function routeTool(message, history, trace) {
     } catch {}
     const route = {
       tool:
-        { get_upcoming_events: "events", get_project_tracker: "tracker", redirect_academic_help: "homework" }[
-          call?.name
-        ] || "kb",
+        {
+          get_upcoming_events: "events",
+          get_project_tracker: "tracker",
+          redirect_academic_help: "homework",
+          redirect_safety_report: "safety",
+          redirect_campus_office: "directory",
+        }[call?.name] || "kb",
       args,
     };
     trace?.update({ tags: [route.tool] }); // dashboard slicing by route
@@ -899,17 +1019,27 @@ const agentGraph = new StateGraph(AgentState)
   .addNode("homework", async (s) => ({
     prepared: homeworkPrepare(s.trace),
   }))
+  .addNode("safety", async (s) => ({
+    prepared: safetyPrepare(s.trace),
+  }))
+  .addNode("directory", async (s) => ({
+    prepared: directoryPrepare(s.route.args, s.trace),
+  }))
   .addEdge(START, "router")
   .addConditionalEdges("router", (s) => s.route.tool, {
     kb: "kb",
     events: "events",
     tracker: "tracker",
     homework: "homework",
+    safety: "safety",
+    directory: "directory",
   })
   .addEdge("kb", END)
   .addEdge("events", END)
   .addEdge("tracker", END)
   .addEdge("homework", END)
+  .addEdge("safety", END)
+  .addEdge("directory", END)
   .compile();
 
 async function agentPrepare(message, history, trace) {
@@ -1320,6 +1450,8 @@ module.exports = {
   expandSiblings,
   hasTutorOfferLanguage,
   HOMEWORK_REPLY,
+  SAFETY_REPLY,
+  DIRECTORY,
   agentGraph,
   pool,
 };

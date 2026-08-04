@@ -34,13 +34,23 @@ const mock = http.createServer((req, res) => {
           .filter((m) => m.role === "user")
           .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
           .join(" ");
-        const name = userText.includes("essay") ? "redirect_academic_help" : "search_knowledge_base";
+        let name = "search_knowledge_base";
+        let args = "{}";
+        if (userText.includes("essay")) name = "redirect_academic_help";
+        else if (userText.includes("harass")) name = "redirect_safety_report";
+        else if (userText.includes("housing")) {
+          name = "redirect_campus_office";
+          args = JSON.stringify({ office: "housing" });
+        } else if (userText.includes("mystery office")) {
+          name = "redirect_campus_office";
+          args = JSON.stringify({ office: "nonexistent_office" });
+        }
         return res.end(
           JSON.stringify({
             id: "resp_mock",
             object: "response",
             status: "completed",
-            output: [{ type: "function_call", name, arguments: "{}", call_id: "c1" }],
+            output: [{ type: "function_call", name, arguments: args, call_id: "c1" }],
             usage: { input_tokens: 1, output_tokens: 1 },
           })
         );
@@ -175,6 +185,43 @@ test("output rail replaces a generated tutor-offer with the canned referral", as
   const { body } = await chat({ message: `Tell me about ${TUTOR_BAIT} funding` });
   assert.equal(body.answer, server.HOMEWORK_REPLY);
   assert.ok(body.sources.some((s) => s.source_url.includes("resources-guides")));
+});
+
+// ---- safety guardrail: verified contacts, never generated -----------------
+
+test("safety report routes to verified contacts without generation", async () => {
+  const { body } = await chat({ message: "How do I report harassment by another student?" });
+  assert.equal(body.crisis, false);
+  assert.equal(body.answer, server.SAFETY_REPLY);
+  assert.ok(body.answer.includes("(213) 740-4321"), "DPS number missing");
+  assert.ok(body.answer.includes("911"), "911 missing");
+  assert.ok(body.sources.some((s) => s.source_url.includes("/resources/emergencies/")));
+});
+
+test("safety reply passes the other guardrails' own checks", () => {
+  assert.ok(!server.hasTutorOfferLanguage(server.SAFETY_REPLY));
+  assert.ok(!server.hasDisallowedAssistantLanguage(server.SAFETY_REPLY));
+});
+
+// ---- directory guardrail: right office, right link ------------------------
+
+test("campus-office question routes to the office's official site", async () => {
+  const { body } = await chat({ message: "How do I apply for USC housing?" });
+  assert.equal(body.crisis, false);
+  assert.ok(body.answer.includes("https://housing.usc.edu"), "housing link missing");
+  assert.ok(body.answer.toLowerCase().includes("not usg"));
+  assert.ok(body.sources.some((s) => s.source_url === "https://housing.usc.edu"));
+});
+
+test("unknown office enum falls back to the campus resources directory", async () => {
+  const { body } = await chat({ message: "Who handles the mystery office thing?" });
+  assert.ok(body.answer.includes("https://studentaffairs.usc.edu/campus-resources/"));
+});
+
+test("every directory entry has a usc.edu-family url", () => {
+  for (const [key, office] of Object.entries(server.DIRECTORY)) {
+    assert.match(office.url, /^https:\/\/[a-z.]*usc\.edu/, `suspicious url for ${key}: ${office.url}`);
+  }
 });
 
 // ---- stream endpoint: replace event, no token drip ------------------------
