@@ -728,6 +728,11 @@
               full = ev.answer || "Please call or text 988 right now.";
               finalSources = ev.sources || [];
               render();
+            } else if (ev.replace) {
+              // server-side guardrail replaced the answer wholesale
+              full = ev.answer || full;
+              finalSources = ev.sources || finalSources;
+              render();
             } else if (ev.done) {
               full += ev.notice || "";
               finalSources = ev.sources || finalSources;

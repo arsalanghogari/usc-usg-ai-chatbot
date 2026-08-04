@@ -468,6 +468,46 @@ async function crisisPayload(message, history) {
   };
 }
 
+// ---- Academic-work guardrail ---------------------------------------------
+// Layered like the crisis pathway: router classifies (layer 1), the prompt
+// forbids tutor offers (layer 2, soft), and an output rail replaces any
+// tutor-offer that slips through generation (layer 3, deterministic).
+
+// wording note: this text must never trip hasTutorOfferLanguage (it is the
+// rail's replacement), so no offer-verb phrasing like "help plan/write"
+const HOMEWORK_REPLY =
+  "That's outside what I can do — I'm USG's info assistant, so essays, assignments, and other coursework aren't something I take on. " +
+  "USC has great support for exactly this, though: the **USC Writing Center** offers free one-on-one support at any stage of the writing process, " +
+  "and USG's resource guides list more academic support options: https://usg.usc.edu/resources/resources-guides/\n\n" +
+  "Happy to answer anything about USG itself!";
+
+const HOMEWORK_SOURCES = [
+  {
+    source_title: "Guides",
+    source_url: "https://usg.usc.edu/resources/resources-guides/",
+    score: 1,
+    source_modified: null,
+    source_modified_year: null,
+    evergreen: true,
+  },
+];
+
+// Fires only when an offer verb AND an academic-work noun co-occur, so
+// normal USG answers (which never discuss essays) can't false-positive.
+function hasTutorOfferLanguage(text) {
+  const s = String(text || "");
+  const noun = /\b(essay|assignment|homework|thesis|coursework|research paper|term paper|problem set|personal statement)\b/i;
+  const offer =
+    /\b(help (you )?|assist (you )?|i can |let'?s |we can |happy to )(write|plan|brainstorm|outline|draft|revise|edit|structure|proofread|workshop|think through)\b/i;
+  return noun.test(s) && offer.test(s);
+}
+
+function homeworkPrepare(trace) {
+  const t = new Date();
+  trace?.span({ name: "homework_redirect", startTime: t, endTime: new Date() });
+  return { direct: HOMEWORK_REPLY, sources: HOMEWORK_SOURCES, instructions: "", userContent: "", notice: "" };
+}
+
 // ---- Agentic routing: KB retrieval vs live events calendar ---------------
 
 // The USG Google Calendar's public ICS feed — the WP events plugin lags it,
@@ -496,6 +536,19 @@ const AGENT_TOOLS = [
     strict: true,
     description:
       "Fetch the LIVE USG project tracker (Legislative Branch dashboard): current projects, how many are active, their statuses, committees, and collaborators. Use for questions about what USG is working on now, project counts, or the status of an initiative. Never for department descriptions or past events.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "redirect_academic_help",
+    strict: true,
+    description:
+      "The user is asking the assistant itself to write, edit, plan, brainstorm, outline, review, or otherwise help produce academic or personal work: essays, assignments, homework, code for a class, applications, personal statements, resumes. Route here to politely decline and refer to USC academic-support resources. Never for questions ABOUT academic policy, classes, or USG programs.",
     parameters: {
       type: "object",
       properties: {},
@@ -542,7 +595,9 @@ async function routeTool(message, history, trace) {
     } catch {}
     const route = {
       tool:
-        { get_upcoming_events: "events", get_project_tracker: "tracker" }[call?.name] || "kb",
+        { get_upcoming_events: "events", get_project_tracker: "tracker", redirect_academic_help: "homework" }[
+          call?.name
+        ] || "kb",
       args,
     };
     trace?.update({ tags: [route.tool] }); // dashboard slicing by route
@@ -841,15 +896,20 @@ const agentGraph = new StateGraph(AgentState)
   .addNode("tracker", async (s) => ({
     prepared: await trackerPrepare(s.message, s.trace),
   }))
+  .addNode("homework", async (s) => ({
+    prepared: homeworkPrepare(s.trace),
+  }))
   .addEdge(START, "router")
   .addConditionalEdges("router", (s) => s.route.tool, {
     kb: "kb",
     events: "events",
     tracker: "tracker",
+    homework: "homework",
   })
   .addEdge("kb", END)
   .addEdge("events", END)
   .addEdge("tracker", END)
+  .addEdge("homework", END)
   .compile();
 
 async function agentPrepare(message, history, trace) {
@@ -961,7 +1021,7 @@ async function ragPrepare(message, trace) {
 
         If the knowledge base truly does not contain enough information, say so plainly.
 
-        You are a USG information assistant, not a tutor or homework helper. If asked to write, edit, or help produce academic work (essays, assignments, code, applications), politely decline to do the work itself and instead point to the relevant USC support resource from the context (e.g. the Writing Center, tutoring, advising) — or to the USG resource guides if nothing specific is in context.
+        You are a USG information assistant, not a tutor or homework helper. If asked to write, edit, or help produce academic or personal work (essays, assignments, code, applications, personal statements), decline ALL forms of producing it — do not offer to write, brainstorm, outline, structure, draft, revise, proofread, or "help think through" the work either. Politely say it's outside what you do and point to the relevant USC support resource from the context (e.g. the Writing Center, tutoring, advising) — or to the USG resource guides if nothing specific is in context.
 
         Be concise, accurate, and human.
       `;
@@ -1063,6 +1123,13 @@ app.post("/api/chat", async (req, res) => {
     if (rag instanceof Error) throw rag;
     const { instructions, userContent, sources, notice } = rag;
 
+    // deterministic routes (academic-work redirect): no generation at all
+    if (rag.direct) {
+      trace?.update({ output: rag.direct });
+      langfuse?.flushAsync().catch(() => {});
+      return res.json({ answer: rag.direct, sources, crisis: false, traceId: trace?.id || null });
+    }
+
     const t = new Date();
     const response = await client.responses.create({
       model: CHAT_MODEL,
@@ -1084,13 +1151,16 @@ app.post("/api/chat", async (req, res) => {
       },
     });
 
-    const answer = (response.output_text || "") + notice;
-    trace?.update({ output: answer });
+    // output rail: a tutor-offer that slipped past the router and prompt is
+    // replaced wholesale with the canned referral (same pattern as crisis)
+    const railed = hasTutorOfferLanguage(response.output_text);
+    const answer = railed ? HOMEWORK_REPLY : (response.output_text || "") + notice;
+    trace?.update({ output: answer, metadata: railed ? { tutor_rail: true } : undefined });
     langfuse?.flushAsync().catch(() => {});
 
     res.json({
       answer,
-      sources,
+      sources: railed ? HOMEWORK_SOURCES : sources,
       crisis: false,
       traceId: trace?.id || null,
     });
@@ -1138,6 +1208,15 @@ app.post("/api/chat/stream", async (req, res) => {
     if (rag instanceof Error) throw rag;
     const { instructions, userContent, sources, notice } = rag;
 
+    // deterministic routes (academic-work redirect): one full event, no stream
+    if (rag.direct) {
+      trace?.update({ output: rag.direct });
+      langfuse?.flushAsync().catch(() => {});
+      send({ replace: true, answer: rag.direct, sources });
+      send({ done: true, sources, notice: "", crisis: false, traceId: trace?.id || null });
+      return res.end();
+    }
+
     const abort = new AbortController();
     req.on("close", () => abort.abort());
 
@@ -1173,10 +1252,23 @@ app.post("/api/chat/stream", async (req, res) => {
       output: full,
       usage: { input: usage?.input_tokens, output: usage?.output_tokens },
     });
-    trace?.update({ output: full + notice });
+
+    // output rail: retract a streamed tutor-offer with a replace event
+    const railed = hasTutorOfferLanguage(full);
+    if (railed) {
+      full = HOMEWORK_REPLY;
+      send({ replace: true, answer: full, sources: HOMEWORK_SOURCES });
+    }
+    trace?.update({ output: railed ? full : full + notice, metadata: railed ? { tutor_rail: true } : undefined });
     langfuse?.flushAsync().catch(() => {});
 
-    send({ done: true, sources, notice, crisis: false, traceId: trace?.id || null });
+    send({
+      done: true,
+      sources: railed ? HOMEWORK_SOURCES : sources,
+      notice: railed ? "" : notice,
+      crisis: false,
+      traceId: trace?.id || null,
+    });
     res.end();
   } catch (err) {
     if (err.name === "AbortError") return res.end();
@@ -1226,6 +1318,8 @@ module.exports = {
   fetchIcsEvents,
   parseIcsDate,
   expandSiblings,
+  hasTutorOfferLanguage,
+  HOMEWORK_REPLY,
   agentGraph,
   pool,
 };

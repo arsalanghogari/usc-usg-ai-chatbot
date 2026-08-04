@@ -214,7 +214,8 @@ async function main() {
     console.log("waiting for backend to wake...");
   }
 
-  const items = bank.slice(OFFSET, OFFSET + LIMIT);
+  const intent = arg("intent", null);
+  const items = (intent ? bank.filter((i) => i.intent === intent) : bank).slice(OFFSET, OFFSET + LIMIT);
   console.log(`wave=${WAVE} sessions=${items.length} variant=${VARIANT} conc=${CONC} dry=${DRY}`);
 
   const results = [];
