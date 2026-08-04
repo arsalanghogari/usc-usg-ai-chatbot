@@ -548,7 +548,7 @@ const AGENT_TOOLS = [
     name: "redirect_academic_help",
     strict: true,
     description:
-      "The user is asking the assistant itself to write, edit, plan, brainstorm, outline, review, or otherwise help produce academic or personal work: essays, assignments, homework, code for a class, applications, personal statements, resumes. Route here to politely decline and refer to USC academic-support resources. Never for questions ABOUT academic policy, classes, or USG programs.",
+      "The user is asking the assistant itself to PRODUCE academic or personal work: write/edit/brainstorm/outline an essay, assignment, homework, code for a class, application, personal statement, or resume. Route here to politely decline and refer to USC academic-support resources. NOT for advice questions — which classes to take, major requirements, study tips, academic policy, or anything about USG programs — those go to the knowledge base.",
     parameters: {
       type: "object",
       properties: {},
