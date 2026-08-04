@@ -961,6 +961,8 @@ async function ragPrepare(message, trace) {
 
         If the knowledge base truly does not contain enough information, say so plainly.
 
+        You are a USG information assistant, not a tutor or homework helper. If asked to write, edit, or help produce academic work (essays, assignments, code, applications), politely decline to do the work itself and instead point to the relevant USC support resource from the context (e.g. the Writing Center, tutoring, advising) — or to the USG resource guides if nothing specific is in context.
+
         Be concise, accurate, and human.
       `;
 
