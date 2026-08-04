@@ -554,6 +554,7 @@ const DIRECTORY = {
   health: { name: "USC Student Health", url: "https://studenthealth.usc.edu" },
   international: { name: "the USC Office of International Services", url: "https://ois.usc.edu" },
   it: { name: "USC IT Services", url: "https://itservices.usc.edu" },
+  commencement: { name: "USC Commencement (graduation tickets & ceremonies)", url: "https://commencement.usc.edu" },
   other: { name: "USC Student Affairs' campus resources directory", url: "https://studentaffairs.usc.edu/campus-resources/" },
 };
 
@@ -647,7 +648,7 @@ const AGENT_TOOLS = [
     name: "redirect_campus_office",
     strict: true,
     description:
-      "The user's question is really for another USC office, not USG: housing applications, dining/meal plans, financial aid, registrar/transcripts/enrollment, parking tickets & permits, DPS services, the graduate student government (GSG), Student Health appointments, international student/visa matters, or campus IT/wifi. Route here to point them at the right office. NOT for USG topics, and NOT for safety/reporting situations (use redirect_safety_report).",
+      "The user's question is really for another USC office, not USG: housing applications, dining/meal plans, financial aid, registrar/transcripts/enrollment, parking tickets & permits, DPS services, the graduate student government (GSG), Student Health appointments, international student/visa matters, campus IT/wifi, or commencement/graduation tickets. Route here to point them at the right office. NOT for USG topics, and NOT for safety/reporting situations (use redirect_safety_report).",
     parameters: {
       type: "object",
       properties: {
@@ -664,6 +665,7 @@ const AGENT_TOOLS = [
             "health",
             "international",
             "it",
+            "commencement",
             "other",
           ],
         },
