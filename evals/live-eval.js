@@ -14,7 +14,6 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", "backend", ".env") });
 
 const API = "https://usg-chat-backend.onrender.com";
-const JUDGE_MODEL = process.env.CHAT_MODEL || "gpt-5.4-mini";
 const LOG = path.join(__dirname, "live-eval-log.jsonl");
 const CACHE_FILE = path.join(__dirname, ".page-cache.json");
 
@@ -22,6 +21,10 @@ const arg = (name, dflt) => {
   const i = process.argv.indexOf("--" + name);
   return i > -1 ? process.argv[i + 1] : dflt;
 };
+// mini by default: the rubric is mechanical, and judging on the full chat
+// model roughly doubles a wave's API cost. --judge-model to override
+// (waves w1-w9 + the guardrail slices were judged on gpt-5.5-2026-04-23).
+const JUDGE_MODEL = arg("judge-model", process.env.JUDGE_MODEL || "gpt-5.4-mini");
 const WAVE = arg("wave", "w1");
 const LIMIT = Number(arg("limit", Infinity));
 const OFFSET = Number(arg("offset", 0));
@@ -197,6 +200,7 @@ async function runSession(item, idx) {
       value: verdict.value,
       reason: verdict.reason,
       comment: verdict.comment,
+      judge: JUDGE_MODEL,
       dry: DRY,
     };
     fs.appendFileSync(LOG, JSON.stringify(row) + "\n");
@@ -218,7 +222,9 @@ async function main() {
 
   const intent = arg("intent", null);
   const items = (intent ? bank.filter((i) => i.intent === intent) : bank).slice(OFFSET, OFFSET + LIMIT);
-  console.log(`wave=${WAVE} sessions=${items.length} variant=${VARIANT} conc=${CONC} dry=${DRY}`);
+  console.log(
+    `wave=${WAVE} sessions=${items.length} variant=${VARIANT} conc=${CONC} dry=${DRY} judge=${JUDGE_MODEL}`
+  );
 
   const results = [];
   let cursor = 0;
