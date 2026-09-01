@@ -41,6 +41,9 @@ const mock = http.createServer((req, res) => {
         else if (userText.includes("housing")) {
           name = "redirect_campus_office";
           args = JSON.stringify({ office: "housing" });
+        } else if (userText.includes("tampon")) {
+          name = "redirect_campus_office";
+          args = JSON.stringify({ office: "menstrual_products" });
         } else if (userText.includes("mystery office")) {
           name = "redirect_campus_office";
           args = JSON.stringify({ office: "nonexistent_office" });
@@ -216,6 +219,22 @@ test("campus-office question routes to the office's official site", async () => 
 test("unknown office enum falls back to the campus resources directory", async () => {
   const { body } = await chat({ message: "Who handles the mystery office thing?" });
   assert.ok(body.answer.includes("https://studentaffairs.usc.edu/campus-resources/"));
+});
+
+test("menstrual questions get USG's product map AND Student Health", async () => {
+  const { body } = await chat({ message: "where can I get a free tampon on campus?" });
+  assert.ok(body.answer.includes("menstrual-product-map"), "product map missing");
+  assert.ok(body.answer.includes("https://studenthealth.usc.edu"), "Student Health missing");
+  assert.ok(!body.answer.toLowerCase().includes("not usg"), "the map IS a USG resource");
+  assert.equal(body.sources.length, 2);
+});
+
+test("redirect_campus_office offers no generic 'other' escape hatch", () => {
+  const tool = server.AGENT_TOOLS.find((t) => t.name === "redirect_campus_office");
+  assert.ok(!tool.parameters.properties.office.enum.includes("other"), "USG topics land here when it exists");
+  for (const office of tool.parameters.properties.office.enum) {
+    assert.ok(server.DIRECTORY[office], `enum offers ${office} with no DIRECTORY entry`);
+  }
 });
 
 test("every directory entry has a usc.edu-family url", () => {

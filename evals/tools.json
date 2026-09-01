@@ -21,5 +21,15 @@
   { "q": "Who won the 2026 USG election?", "tool": "kb" },
   { "q": "What is the Performing and Visual Arts Fund?", "tool": "kb" },
   { "q": "How do I get a graphic made for my org's event?", "tool": "kb" },
-  { "q": "Which buildings have late night study rooms?", "tool": "kb" }
+  { "q": "Which buildings have late night study rooms?", "tool": "kb" },
+  { "q": "What assemblies are part of USG?", "tool": "kb" },
+  { "q": "Is there an assembly for transfer students?", "tool": "kb" },
+
+  { "q": "Where can I get free tampons on campus?", "tool": "directory" },
+  { "q": "I just got my period and need a pad", "tool": "directory" },
+
+  { "q": "What is TSA", "tool": "kb" },
+  { "q": "I need help with my RSO app", "tool": "kb" },
+  { "q": "How many committees are there?", "tool": "kb" },
+  { "q": "How many assemblies are there?", "tool": "kb" }
 ]
