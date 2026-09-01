@@ -14,3 +14,11 @@
 {"ts":"2026-07-20T13:33:03.621Z","git":"f7d8ac1","backend":"pgvector","rerank":true,"k":4,"n":51,"hit_rate":0.98,"mrr":0.907,"faithfulness":null}
 {"ts":"2026-07-20T13:59:01.011Z","git":"05156c4","kind":"tool-selection","n":22,"tool_accuracy":1,"wrong_tool_rate":0}
 {"ts":"2026-07-25T12:58:45.018Z","git":"0ae4ad5","backend":"pgvector","rerank":true,"k":4,"n":55,"hit_rate":0.982,"mrr":0.945,"faithfulness":null}
+{"ts":"2026-08-28T20:44:30.875Z","git":"c113a87","backend":"pgvector","rerank":true,"k":4,"n":55,"hit_rate":0.891,"mrr":0.833,"faithfulness":null}
+{"ts":"2026-08-28T20:45:26.565Z","git":"c113a87","kind":"tool-selection","n":22,"tool_accuracy":0.955,"wrong_tool_rate":0.045}
+{"ts":"2026-08-28T20:46:01.072Z","git":"c113a87","kind":"tool-selection","n":22,"tool_accuracy":0.864,"wrong_tool_rate":0.136}
+{"ts":"2026-08-28T20:46:30.041Z","git":"c113a87","kind":"tool-selection","n":22,"tool_accuracy":1,"wrong_tool_rate":0}
+{"ts":"2026-08-28T21:48:33.974Z","git":"c113a87","kind":"tool-selection","n":22,"tool_accuracy":0.591,"wrong_tool_rate":0.409}
+{"ts":"2026-08-28T23:22:24.731Z","git":"c113a87","kind":"tool-selection","n":26,"tool_accuracy":1,"wrong_tool_rate":0}
+{"ts":"2026-09-01T01:15:48.478Z","git":"c113a87","kind":"tool-selection","n":30,"tool_accuracy":0.933,"wrong_tool_rate":0.067}
+{"ts":"2026-09-01T01:16:55.352Z","git":"c113a87","kind":"tool-selection","n":30,"tool_accuracy":1,"wrong_tool_rate":0}
