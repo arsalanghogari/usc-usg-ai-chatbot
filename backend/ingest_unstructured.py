@@ -55,7 +55,7 @@ on conflict (source_url, chunk_index) do update set
 """
 
 
-def push_to_db(records: List[Dict[str, Any]]) -> None:
+def push_to_db(records: List[Dict[str, Any]], prune: bool = True) -> None:
     import psycopg
 
     with psycopg.connect(SUPABASE_DB_URL) as conn, conn.cursor() as cur:
@@ -74,7 +74,12 @@ def push_to_db(records: List[Dict[str, Any]]) -> None:
         # Drop rows for pages no longer in the allowlist, and stale tail
         # chunks from pages that shrank since the last crawl.
         urls = sorted({r["source_url"] for r in records})
-        cur.execute("delete from chunks where not (source_url = any(%s))", (urls,))
+        # Only safe when every page was fetched: a transient timeout would
+        # otherwise evict that page's chunks as if it had been unpublished.
+        if prune:
+            cur.execute("delete from chunks where not (source_url = any(%s))", (urls,))
+        else:
+            print("Crawl incomplete — skipping the removed-page purge", file=sys.stderr)
         for url in urls:
             n = sum(1 for r in records if r["source_url"] == url)
             cur.execute(
@@ -289,15 +294,28 @@ def ingest_page(page: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def main() -> None:
+    # ponytail: scheme check only — a bad URL should fail before the crawl and
+    # the embedding spend, not after. Full parse still happens at connect time.
+    if SUPABASE_DB_URL and not SUPABASE_DB_URL.startswith(("postgresql://", "postgres://")):
+        print(
+            "SUPABASE_DB_URL is not a Postgres URI (must start with postgresql://). "
+            "Looks like the Supabase project/API URL was used instead of the "
+            "database connection string.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     pages = load_pages()
     all_records: List[Dict[str, Any]] = []
 
+    failed: List[str] = []
     for page in pages:
         try:
             page_records = ingest_page(page)
             all_records.extend(page_records)
             print(f"Ingested {len(page_records)} chunks from {page['url']}")
         except Exception as e:
+            failed.append(page["url"])
             print(f"Skipping {page['url']}: {e}", file=sys.stderr)
 
     if not all_records:
@@ -315,8 +333,11 @@ def main() -> None:
     KB_PATH.write_text(json.dumps(kb, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote {KB_PATH} with {len(all_records)} chunks")
 
+    if failed:
+        print(f"{len(failed)} page(s) failed to fetch: " + ", ".join(failed), file=sys.stderr)
+
     if SUPABASE_DB_URL:
-        push_to_db(all_records)
+        push_to_db(all_records, prune=not failed)
     else:
         print("SUPABASE_DB_URL not set, skipping Postgres push", file=sys.stderr)
 
