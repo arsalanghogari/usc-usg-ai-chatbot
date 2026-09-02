@@ -22,3 +22,8 @@
 {"ts":"2026-08-28T23:22:24.731Z","git":"c113a87","kind":"tool-selection","n":26,"tool_accuracy":1,"wrong_tool_rate":0}
 {"ts":"2026-09-01T01:15:48.478Z","git":"c113a87","kind":"tool-selection","n":30,"tool_accuracy":0.933,"wrong_tool_rate":0.067}
 {"ts":"2026-09-01T01:16:55.352Z","git":"c113a87","kind":"tool-selection","n":30,"tool_accuracy":1,"wrong_tool_rate":0}
+{"ts":"2026-09-02T23:40:27.516Z","git":"c7d61f5","backend":"pgvector","hybrid":false,"rerank":true,"k":4,"n":60,"hit_rate":0.9,"mrr":0.807,"faithfulness":null}
+{"ts":"2026-09-02T23:41:54.744Z","git":"c7d61f5","backend":"pgvector","hybrid":true,"rerank":true,"k":4,"n":60,"hit_rate":0.9,"mrr":0.85,"faithfulness":null}
+{"ts":"2026-09-02T23:43:33.646Z","git":"c7d61f5","backend":"pgvector","hybrid":false,"rerank":true,"k":4,"n":60,"hit_rate":0.9,"mrr":0.828,"faithfulness":null}
+{"ts":"2026-09-02T23:44:50.682Z","git":"c7d61f5","backend":"pgvector","hybrid":true,"rerank":true,"k":4,"n":60,"hit_rate":0.9,"mrr":0.822,"faithfulness":null}
+{"ts":"2026-09-02T23:51:17.419Z","git":"c7d61f5","backend":"pgvector","hybrid":true,"rerank":true,"k":4,"n":60,"hit_rate":0.883,"mrr":0.81,"faithfulness":null}

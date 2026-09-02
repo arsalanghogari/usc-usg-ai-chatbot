@@ -55,6 +55,11 @@ const HYBRID = process.env.HYBRID !== "0";
 // (cosine vs ts_rank_cd), so fuse by rank position instead. 60 is the constant
 // from the original RRF paper.
 const RRF_K = Number(process.env.RRF_K) || 60;
+// The lexical channel only runs when the question contains a term rare enough
+// to discriminate. Measured on golden.json: ungated it cost 13 rows and 0.025
+// MRR (common words match everywhere); gated at 5 it gains 0.015 MRR overall,
+// 0.19 on identity questions, and makes nothing worse.
+const LEX_MAX_DF = Number(process.env.LEX_MAX_DF) || 5;
 
 // Two-stage retrieval: RERANK=0 disables the second stage (for A/B evals).
 const RERANK = process.env.RERANK !== "0";
@@ -186,7 +191,13 @@ async function topChunksDb(queryEmbedding, k = 4, text = null) {
 
 async function hybridQuery(vec, text, k) {
   const { rows } = await pool.query(
-    `with dense as (
+    `with rare as (
+       select 1 from term_df
+       where word = any(tsvector_to_array(to_tsvector('english', $2)))
+         and ndoc <= $5
+       limit 1
+     ),
+     dense as (
        select id, row_number() over (order by dist) as rank from (
          select id, embedding <=> $1::vector as dist
          from chunks order by embedding <=> $1::vector limit $3
@@ -196,7 +207,7 @@ async function hybridQuery(vec, text, k) {
        select id, row_number() over (order by lex desc) as rank from (
          select c.id, ts_rank_cd(c.tsv, q) as lex
          from chunks c, websearch_to_tsquery('english', $2) q
-         where c.tsv @@ q
+         where exists (select 1 from rare) and c.tsv @@ q
          order by lex desc limit $3
        ) l
      )
@@ -207,7 +218,7 @@ async function hybridQuery(vec, text, k) {
      join chunks c on c.id = coalesce(d.id, l.id)
      order by score desc
      limit $3`,
-    [vec, text, k, RRF_K]
+    [vec, text, k, RRF_K, LEX_MAX_DF]
   );
   return rows;
 }
@@ -383,7 +394,11 @@ function topChunks(queryEmbedding, chunks, k = 4, text = null) {
     .sort((a, b) => b.score - a.score);
   if (!HYBRID || !text) return dense.slice(0, k);
 
-  const terms = lexTerms(text);
+  // same rarity gate as the SQL path, counted over the corpus in hand
+  const terms = lexTerms(text).filter((t) => {
+    const df = chunks.reduce((n, c) => n + (`${c.source_title || ""} ${c.text}`.toLowerCase().includes(t) ? 1 : 0), 0);
+    return df > 0 && df <= LEX_MAX_DF;
+  });
   const lexical = terms.length
     ? chunks
         .map((chunk) => {
