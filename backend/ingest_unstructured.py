@@ -39,6 +39,14 @@ create table if not exists chunks (
 );
 create index if not exists chunks_embedding_hnsw
   on chunks using hnsw (embedding vector_cosine_ops);
+-- Lexical half of hybrid retrieval. Generated, so the upsert never writes it:
+-- Postgres recomputes the tsvector whenever title or text changes. Names are
+-- what dense retrieval is worst at, and what this index is best at.
+alter table chunks add column if not exists tsv tsvector
+  generated always as (
+    to_tsvector('english', coalesce(source_title, '') || ' ' || text)
+  ) stored;
+create index if not exists chunks_tsv_gin on chunks using gin (tsv);
 """
 
 UPSERT_SQL = """
