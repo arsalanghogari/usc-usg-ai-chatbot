@@ -46,6 +46,16 @@ if (process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY) {
   langfuse = new Langfuse();
 }
 
+// Hybrid retrieval: dense (embeddings) recalls by meaning, lexical (Postgres
+// full-text) recalls by literal term. Names and acronyms are nearly meaningless
+// to an embedding, so "who is jashan dalal" used to miss a roster page that
+// names him. HYBRID=0 disables the lexical channel (for A/B evals).
+const HYBRID = process.env.HYBRID !== "0";
+// Reciprocal Rank Fusion: the two channels' scores are on incomparable scales
+// (cosine vs ts_rank_cd), so fuse by rank position instead. 60 is the constant
+// from the original RRF paper.
+const RRF_K = Number(process.env.RRF_K) || 60;
+
 // Two-stage retrieval: RERANK=0 disables the second stage (for A/B evals).
 const RERANK = process.env.RERANK !== "0";
 const RERANK_MODEL = process.env.RERANK_MODEL || "gpt-5.4-mini";
@@ -138,17 +148,66 @@ async function expandSiblings(matches) {
   }
 }
 
-async function topChunksDb(queryEmbedding, k = 4) {
-  const vec = `[${queryEmbedding.join(",")}]`;
-  const { rows } = await pool.query(
-    `select source_url, source_title, chunk_index, text,
+const CHUNK_COLS = `source_url, source_title, chunk_index, text,
             source_modified::text as source_modified,
-            source_modified_year, evergreen,
-            1 - (embedding <=> $1::vector) as score
-     from chunks
-     order by embedding <=> $1::vector
-     limit $2`,
-    [vec, k]
+            source_modified_year, evergreen`;
+
+// `text` is the user's raw message, deliberately NOT retrievalQuery()'s output:
+// the assembly hint helps embeddings and only dilutes term matching. Omit it
+// (or set HYBRID=0) for dense-only retrieval.
+async function topChunksDb(queryEmbedding, k = 4, text = null) {
+  const vec = `[${queryEmbedding.join(",")}]`;
+  if (!HYBRID || !text) {
+    const { rows } = await pool.query(
+      `select ${CHUNK_COLS}, 1 - (embedding <=> $1::vector) as score
+       from chunks
+       order by embedding <=> $1::vector
+       limit $2`,
+      [vec, k]
+    );
+    return rows;
+  }
+  // Both channels rank independently, then fuse. A question with no indexable
+  // terms yields an empty tsquery, no lexical rows, and the full outer join
+  // hands back exactly the dense ranking — hybrid only ever adds candidates.
+  try {
+    return await hybridQuery(vec, text, k);
+  } catch (e) {
+    // The tsv column arrives with the next ingest; until then (or if a deploy
+    // lands before the migration) keep answering on dense alone rather than
+    // 500ing the kb route. Loud once, so it can't rot into a silent downgrade.
+    if (!topChunksDb.warned) {
+      console.warn("hybrid retrieval unavailable, falling back to dense:", e.message);
+      topChunksDb.warned = true;
+    }
+    return topChunksDb(queryEmbedding, k, null);
+  }
+}
+
+async function hybridQuery(vec, text, k) {
+  const { rows } = await pool.query(
+    `with dense as (
+       select id, row_number() over (order by dist) as rank from (
+         select id, embedding <=> $1::vector as dist
+         from chunks order by embedding <=> $1::vector limit $3
+       ) d
+     ),
+     lexical as (
+       select id, row_number() over (order by lex desc) as rank from (
+         select c.id, ts_rank_cd(c.tsv, q) as lex
+         from chunks c, websearch_to_tsquery('english', $2) q
+         where c.tsv @@ q
+         order by lex desc limit $3
+       ) l
+     )
+     select ${CHUNK_COLS},
+            coalesce(1.0 / ($4 + d.rank), 0) + coalesce(1.0 / ($4 + l.rank), 0) as score
+     from dense d
+     full outer join lexical l on d.id = l.id
+     join chunks c on c.id = coalesce(d.id, l.id)
+     order by score desc
+     limit $3`,
+    [vec, text, k, RRF_K]
   );
   return rows;
 }
@@ -288,14 +347,56 @@ function assessFreshness(sources, now = new Date()) {
   };
 }
 
-function topChunks(queryEmbedding, chunks, k = 4) {
-  return chunks
+// ponytail: the dev/test twin of Postgres full-text search — exact tokens, no
+// stemming, no idf. Enough to surface a name in a 379-chunk corpus, which is
+// all the kb.json path is for; production ranks with ts_rank_cd over a GIN
+// index. Upgrade only if this ever disagrees with prod on a golden row.
+const LEX_STOPWORDS = new Set(["the", "and", "for", "who", "what", "when", "where", "how", "why", "does", "did", "are", "was", "usg", "usc"]);
+function lexTerms(text) {
+  return [...new Set(String(text).toLowerCase().match(/[a-z0-9]+/g) || [])].filter(
+    (t) => t.length > 2 && !LEX_STOPWORDS.has(t)
+  );
+}
+
+function rrfFuse(rankings, k, rrfK = RRF_K) {
+  const scores = new Map();
+  const byKey = new Map();
+  for (const ranking of rankings) {
+    ranking.forEach((chunk, i) => {
+      const key = chunk.source_url + "#" + chunk.chunk_index;
+      scores.set(key, (scores.get(key) || 0) + 1 / (rrfK + i + 1));
+      byKey.set(key, chunk);
+    });
+  }
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, k)
+    .map(([key, score]) => ({ ...byKey.get(key), score }));
+}
+
+function topChunks(queryEmbedding, chunks, k = 4, text = null) {
+  const dense = chunks
     .map((chunk) => ({
       ...chunk,
       score: cosineSimilarity(queryEmbedding, chunk.embedding),
     }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k);
+    .sort((a, b) => b.score - a.score);
+  if (!HYBRID || !text) return dense.slice(0, k);
+
+  const terms = lexTerms(text);
+  const lexical = terms.length
+    ? chunks
+        .map((chunk) => {
+          const hay = `${chunk.source_title || ""} ${chunk.text}`.toLowerCase();
+          return { chunk, hits: terms.filter((t) => hay.includes(t)).length };
+        })
+        .filter((x) => x.hits > 0)
+        .sort((a, b) => b.hits - a.hits)
+        .slice(0, k)
+        .map((x) => x.chunk)
+    : [];
+  if (!lexical.length) return dense.slice(0, k);
+  return rrfFuse([dense.slice(0, k), lexical], k);
 }
 
 const CRISIS_REPLIES = [
@@ -1110,9 +1211,9 @@ async function ragPrepare(message, trace) {
   const kCandidates = RERANK ? RERANK_CANDIDATES : 4;
   let matches;
   if (pool) {
-    matches = await topChunksDb(queryEmbedding, kCandidates);
+    matches = await topChunksDb(queryEmbedding, kCandidates, message);
   } else {
-    matches = topChunks(queryEmbedding, loadKb().chunks, kCandidates);
+    matches = topChunks(queryEmbedding, loadKb().chunks, kCandidates, message);
   }
   if (!matches.length) {
     const err = new Error("Knowledge base is empty. Run ingestion first.");
@@ -1128,7 +1229,7 @@ async function ragPrepare(message, trace) {
       chunk: m.chunk_index,
       score: m.score,
     })),
-    metadata: { backend: pool ? "pgvector" : "kb.json", k: kCandidates },
+    metadata: { backend: pool ? "pgvector" : "kb.json", k: kCandidates, hybrid: HYBRID },
   });
 
   if (RERANK) {
@@ -1477,6 +1578,8 @@ module.exports = {
   parseIcsDate,
   expandSiblings,
   retrievalQuery,
+  rrfFuse,
+  HYBRID,
   hasTutorOfferLanguage,
   HOMEWORK_REPLY,
   SAFETY_REPLY,
