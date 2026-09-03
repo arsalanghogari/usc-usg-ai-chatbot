@@ -17,11 +17,11 @@ const golden = JSON.parse(fs.readFileSync(path.join(__dirname, "golden.json"), "
 
 const { client, CHAT_MODEL } = server;
 
-async function retrieve(q, queryEmbedding) {
+async function retrieve(q, queryEmbedding, text = null) {
   const kCand = server.RERANK ? 20 : K;
   const cands = server.pool
-    ? await server.topChunksDb(queryEmbedding, kCand)
-    : server.topChunks(queryEmbedding, server.loadKb().chunks, kCand);
+    ? await server.topChunksDb(queryEmbedding, kCand, text)
+    : server.topChunks(queryEmbedding, server.loadKb().chunks, kCand, text);
   return server.RERANK ? server.rerank(q, cands, K) : cands;
 }
 
@@ -59,7 +59,7 @@ async function main() {
     // same query the server retrieves with (assembly bias included)
     const rq = server.retrievalQuery(item.q);
     const emb = await server.embed(rq);
-    const matches = await retrieve(rq, emb);
+    const matches = await retrieve(rq, emb, item.q);
     const urls = [...new Set(matches.map((m) => m.source_url))];
     const rank = urls.findIndex((u) => expected.includes(u)) + 1; // 0 = miss
 
@@ -104,6 +104,7 @@ async function main() {
     ts: new Date().toISOString(),
     git: execSync("git rev-parse --short HEAD", { cwd: __dirname }).toString().trim(),
     backend: server.pool ? "pgvector" : "kb.json",
+    hybrid: server.HYBRID,
     rerank: server.RERANK,
     k: K,
     n,

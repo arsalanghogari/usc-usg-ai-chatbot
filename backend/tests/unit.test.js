@@ -142,6 +142,43 @@ test("expandSiblings pulls whole pages in order, keeps picked scores", async () 
   assert.ok(out.every((c) => !c.embedding)); // no embeddings leaked into context
 });
 
+// The August failure this exists to prevent: a bare name is nearly meaningless
+// to an embedding, so dense retrieval ranked prose above the roster page that
+// actually lists the person and the bot said they weren't in USG at all.
+test("hybrid retrieval surfaces a roster chunk dense ranking misses", () => {
+  const { topChunks } = require("../server.js");
+  const chunk = (url, i, text, embedding) => ({
+    source_url: url, source_title: url, chunk_index: i, text, embedding,
+  });
+  const corpus = [
+    // three chunks the query embedding "likes", none of which name her
+    chunk("https://usg.usc.edu/blog/senate-press-release/", 0, "The senate discussed advocacy work at length.", [1, 0]),
+    chunk("https://usg.usc.edu/blog/committee-news/", 1, "Committee leadership met to plan advocacy programming.", [0.99, 0.14]),
+    chunk("https://usg.usc.edu/blog/older-post/", 2, "More prose about USG advocacy and programming.", [0.98, 0.2]),
+    // the roster page: names her once, embeds nowhere near the query
+    chunk("https://usg.usc.edu/meet-our-team-legislative/", 3, "Priya Raghunathan, APASA Advocacy Liaison", [0, 1]),
+  ];
+  const q = [1, 0];
+
+  const dense = topChunks(q, corpus, 3, null);
+  assert.ok(!dense.some((c) => c.chunk_index === 3), "fixture invalid: dense already finds the roster");
+
+  const hybrid = topChunks(q, corpus, 3, "who is priya raghunathan");
+  assert.ok(hybrid.some((c) => c.chunk_index === 3), "lexical channel did not surface the roster chunk");
+  assert.ok(hybrid.every((c) => typeof c.score === "number"));
+});
+
+test("rrfFuse ranks by summed reciprocal rank, deduping across channels", () => {
+  const { rrfFuse } = require("../server.js");
+  const a = { source_url: "u", chunk_index: 1 };
+  const b = { source_url: "u", chunk_index: 2 };
+  const c = { source_url: "u", chunk_index: 3 };
+  // b is second in both channels; a and c each lead one. Agreement wins.
+  const out = rrfFuse([[a, b], [c, b]], 3);
+  assert.equal(out.length, 3, "the same chunk in both channels must not double up");
+  assert.equal(out[0].chunk_index, 2);
+});
+
 // "assembly" means a Programming Department community assembly on the USG
 // site, so retrieval gets that hint; everything else is passed through.
 test("retrievalQuery biases assembly questions, leaves others alone", () => {

@@ -39,6 +39,22 @@ create table if not exists chunks (
 );
 create index if not exists chunks_embedding_hnsw
   on chunks using hnsw (embedding vector_cosine_ops);
+-- Lexical half of hybrid retrieval. Generated, so the upsert never writes it:
+-- Postgres recomputes the tsvector whenever title or text changes. Names are
+-- what dense retrieval is worst at, and what this index is best at.
+alter table chunks add column if not exists tsv tsvector
+  generated always as (
+    to_tsvector('english', coalesce(source_title, '') || ' ' || text)
+  ) stored;
+create index if not exists chunks_tsv_gin on chunks using gin (tsv);
+-- Document frequency per lexeme, so retrieval can tell a name (1-2 chunks)
+-- from a word like "senate" (136). Only rare terms are allowed to steer the
+-- lexical channel; common ones match everything and drown the dense ranking.
+create materialized view if not exists term_df as
+  -- schema-qualified: ts_stat's inner query runs with a restricted search_path
+  -- inside create/refresh materialized view.
+  select word, ndoc from ts_stat('select tsv from public.chunks');
+create unique index if not exists term_df_word on term_df (word);
 """
 
 UPSERT_SQL = """
@@ -80,6 +96,7 @@ def push_to_db(records: List[Dict[str, Any]], prune: bool = True) -> None:
             cur.execute("delete from chunks where not (source_url = any(%s))", (urls,))
         else:
             print("Crawl incomplete — skipping the removed-page purge", file=sys.stderr)
+        cur.execute("refresh materialized view term_df")
         for url in urls:
             n = sum(1 for r in records if r["source_url"] == url)
             cur.execute(
