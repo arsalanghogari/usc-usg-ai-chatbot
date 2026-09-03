@@ -45,7 +45,18 @@ const STYLES = [
 ];
 
 const bank = JSON.parse(fs.readFileSync(path.join(__dirname, "live-questions.json"), "utf-8"));
-const pageCache = fs.existsSync(CACHE_FILE) ? JSON.parse(fs.readFileSync(CACHE_FILE, "utf-8")) : {};
+// The cache is a convenience across a run, not an archive: a stale one silently
+// turns "[live page]" into month-old text and the judge then fails answers for
+// "contradicting" a roster the site has since updated (this cost the Aug 16-20
+// prod eval 38 points of apparent accuracy). Anything older than a week is dropped.
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const pageCache = (() => {
+  if (!fs.existsSync(CACHE_FILE)) return {};
+  const c = JSON.parse(fs.readFileSync(CACHE_FILE, "utf-8"));
+  if (!(Date.now() - new Date(c._fetchedAt || 0) < CACHE_TTL_MS)) return {};
+  delete c._fetchedAt;
+  return c;
+})();
 
 // usg.usc.edu WAF wants a browser UA; site also 502s intermittently, so the
 // ingested corpus (kb.json — a recent snapshot of the same pages) is the fallback.
@@ -113,8 +124,8 @@ For questions belonging to another USC office (housing, dining, financial aid, r
 Otherwise rate 0 and be specific about the failure.
 
 Do NOT penalize: the trailing "⚠️ ..." staleness notice (it is a deliberate deterministic feature), hedging on time-sensitive facts, or offering the source links.
-Also do NOT penalize: "page last updated on <date>" claims (that date comes from page metadata the bot legitimately sees, even if not visible in the page text); when two cited pages conflict (e.g. an old blog vs a newer policy page), following the newer page is CORRECT, not a fabrication.
-If the cited source is the USG Events Calendar (usg.usc.edu/calendar) or the Live Project Tracker (legislative-branch page), the bot answered from a live data feed you cannot see — do NOT treat event or project specifics as fabricated for being absent from page text; judge only responsiveness, internal consistency, and usability.
+NEVER rate 0 over a "page last updated on <date>" claim, however wrong or future-dated it looks — that date comes from page metadata the bot legitimately sees and you do not; ignore those dates entirely and grade the substantive answer; when two cited pages conflict (e.g. an old blog vs a newer policy page), following the newer page is CORRECT, not a fabrication.
+If the cited source is the USG Events Calendar (usg.usc.edu/calendar) or the Live Project Tracker (legislative-branch page), the bot answered from a live data feed you cannot see — do NOT treat event or project specifics as fabricated for being absent from page text — a specific meeting date or project status is NEVER grounds for a 0 here; judge only responsiveness, internal consistency, and usability.
 "The USG Senate meets every Tuesday at 7:00 p.m. in TCC 450 (Tutor Forum)" (with open forum) is a documented fact stated across many USG press releases — never count stating it as fabrication, regardless of which pages are cited.
 If page text is unavailable (null), judge (b) and (c) and note grounding was unverifiable — only rate 0 on grounding if the answer makes suspicious specific claims (names, dates, dollar amounts) for which no source was cited at all.
 
@@ -245,7 +256,7 @@ async function main() {
     }
   }
   await Promise.all(Array.from({ length: CONC }, worker));
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(pageCache));
+  fs.writeFileSync(CACHE_FILE, JSON.stringify({ ...pageCache, _fetchedAt: new Date().toISOString() }));
 
   const rated = results.filter((r) => r.value !== null);
   const up = rated.filter((r) => r.value === 1).length;
@@ -255,7 +266,11 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = { RUBRIC, judge, openai }; // shared with prod-eval.js
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

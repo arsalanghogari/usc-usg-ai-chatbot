@@ -56,8 +56,10 @@ async function main() {
 
   for (const item of golden) {
     const expected = Array.isArray(item.expected) ? item.expected : [item.expected];
-    const emb = await server.embed(item.q);
-    const matches = await retrieve(item.q, emb);
+    // same query the server retrieves with (assembly bias included)
+    const rq = server.retrievalQuery(item.q);
+    const emb = await server.embed(rq);
+    const matches = await retrieve(rq, emb);
     const urls = [...new Set(matches.map((m) => m.source_url))];
     const rank = urls.findIndex((u) => expected.includes(u)) + 1; // 0 = miss
 

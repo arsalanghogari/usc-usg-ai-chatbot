@@ -141,3 +141,11 @@ test("expandSiblings pulls whole pages in order, keeps picked scores", async () 
   assert.equal(out.find((c) => c.chunk_index === pick.chunk_index).score, 0.91);
   assert.ok(out.every((c) => !c.embedding)); // no embeddings leaked into context
 });
+
+// "assembly" means a Programming Department community assembly on the USG
+// site, so retrieval gets that hint; everything else is passed through.
+test("retrievalQuery biases assembly questions, leaves others alone", () => {
+  const { retrievalQuery } = require("../server.js");
+  assert.match(retrievalQuery("when do the assemblies meet"), /Programming Department/);
+  assert.equal(retrievalQuery("who is the USG president"), "who is the USG president");
+});

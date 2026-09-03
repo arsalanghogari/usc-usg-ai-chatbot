@@ -3,3 +3,7 @@
 __pycache__/
 node_modules/
 backend/kb.json
+
+# eval sidecars: regenerated per run, not history
+evals/.page-cache.json
+evals/prod-eval-log.jsonl

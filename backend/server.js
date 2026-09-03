@@ -543,6 +543,8 @@ function safetyPrepare(trace) {
 // site instead of a RAG answer (the eval's fabricated-office-hours cluster).
 // Stable top-level USC domains only.
 
+const MENSTRUAL_MAP_URL = "https://usg.usc.edu/resources-health-and-wellness-menstrual-product-map/";
+
 const DIRECTORY = {
   housing: { name: "USC Housing", url: "https://housing.usc.edu" },
   dining: { name: "USC Hospitality (dining)", url: "https://hospitality.usc.edu" },
@@ -555,6 +557,19 @@ const DIRECTORY = {
   international: { name: "the USC Office of International Services", url: "https://ois.usc.edu" },
   it: { name: "USC IT Services", url: "https://itservices.usc.edu" },
   commencement: { name: "USC Commencement (graduation tickets & ceremonies)", url: "https://commencement.usc.edu" },
+  // The one entry that IS a USG resource: USG runs the product map, so it
+  // gets its own reply instead of the "not USG" template.
+  menstrual_products: {
+    name: "Menstrual Product Map",
+    url: MENSTRUAL_MAP_URL,
+    direct:
+      `USG keeps a **Menstrual Product Map** of campus restrooms and spaces stocked with free pads and tampons: ${MENSTRUAL_MAP_URL}\n\n` +
+      "For anything medical — cramps, birth control, exams, prescriptions — **USC Student Health** is the place to go: https://studenthealth.usc.edu",
+    sources: [
+      { name: "Menstrual Product Map", url: MENSTRUAL_MAP_URL },
+      { name: "USC Student Health", url: "https://studenthealth.usc.edu" },
+    ],
+  },
   other: { name: "USC Student Affairs' campus resources directory", url: "https://studentaffairs.usc.edu/campus-resources/" },
 };
 
@@ -564,18 +579,17 @@ function directoryPrepare(args, trace) {
   trace?.span({ name: "directory_redirect", startTime: t, endTime: new Date(), output: { office: args?.office } });
   return {
     direct:
+      office.direct ||
       `That one's handled by **${office.name}**, not USG — you'll find it at ${office.url}\n\n` +
-      "I only cover the Undergraduate Student Government, but I'm happy to help with anything USG-related!",
-    sources: [
-      {
-        source_title: office.name,
-        source_url: office.url,
-        score: 1,
-        source_modified: null,
-        source_modified_year: null,
-        evergreen: true,
-      },
-    ],
+        "I only cover the Undergraduate Student Government, but I'm happy to help with anything USG-related!",
+    sources: (office.sources || [office]).map((o) => ({
+      source_title: o.name,
+      source_url: o.url,
+      score: 1,
+      source_modified: null,
+      source_modified_year: null,
+      evergreen: true,
+    })),
     instructions: "",
     userContent: "",
     notice: "",
@@ -609,7 +623,7 @@ const AGENT_TOOLS = [
     name: "get_project_tracker",
     strict: true,
     description:
-      "Fetch the LIVE USG project tracker (Legislative Branch dashboard): current projects, how many are active, their statuses, committees, and collaborators. Use for questions about what USG is working on now, project counts, or the status of an initiative. Never for department descriptions or past events.",
+      "Fetch the LIVE USG project tracker (Legislative Branch dashboard): current projects, how many are active, their statuses, owning committees, and collaborators. Use for questions about what USG is working on now, project counts, or the status of an initiative. Never for department descriptions or past events, and never for how many committees, assemblies, senators or staff USG has — those rosters live in the knowledge base.",
     parameters: {
       type: "object",
       properties: {},
@@ -622,7 +636,7 @@ const AGENT_TOOLS = [
     name: "redirect_academic_help",
     strict: true,
     description:
-      "The user is asking the assistant itself to PRODUCE academic or personal work: write/edit/brainstorm/outline an essay, assignment, homework, code for a class, application, personal statement, or resume. Route here to politely decline and refer to USC academic-support resources. NOT for advice questions — which classes to take, major requirements, study tips, academic policy, or anything about USG programs — those go to the knowledge base.",
+      "The user is asking the assistant itself to PRODUCE academic or personal work: write/edit/brainstorm/outline an essay, assignment, homework, code for a class, personal statement, job/grad-school application, or resume. Route here to politely decline and refer to USC academic-support resources. NOT for advice questions — which classes to take, major requirements, study tips, academic policy, or anything about USG programs — and NOT for help with a USG/RSO form such as a club recognition or funding application, which is a process question — those go to the knowledge base.",
     parameters: {
       type: "object",
       properties: {},
@@ -648,7 +662,7 @@ const AGENT_TOOLS = [
     name: "redirect_campus_office",
     strict: true,
     description:
-      "The user's question is really for another USC office, not USG: housing applications, dining/meal plans, financial aid, registrar/transcripts/enrollment, parking tickets & permits, DPS services, the graduate student government (GSG), Student Health appointments, international student/visa matters, campus IT/wifi, or commencement/graduation tickets. Route here to point them at the right office. NOT for USG topics, and NOT for safety/reporting situations (use redirect_safety_report).",
+      "The user's question is really for another USC office, not USG: housing applications, dining/meal plans, financial aid, registrar/transcripts/enrollment, parking tickets & permits, DPS services, the graduate student government (GSG), Student Health appointments, international student/visa matters, campus IT/wifi, or commencement/graduation tickets. Also route here — with office 'menstrual_products' — for ANY menstrual/period question: where to get free pads or tampons, period products on campus, period pain. Route here to point them at the right office. NOT for anything USG itself runs — its assemblies (BSA, QUASA, TSA...), RSO recognition/funding, events, resources or people — and NOT for safety/reporting situations (use redirect_safety_report). If the question is not clearly one of the offices listed above, use the knowledge base instead.",
     parameters: {
       type: "object",
       properties: {
@@ -666,7 +680,7 @@ const AGENT_TOOLS = [
             "international",
             "it",
             "commencement",
-            "other",
+            "menstrual_products",
           ],
         },
       },
@@ -701,7 +715,9 @@ async function routeTool(message, history, trace) {
   try {
     const resp = await client.responses.create({
       model: ROUTER_MODEL,
-      instructions: "Route the user's question to exactly one tool.",
+      instructions:
+        "Route the user's question to exactly one tool. " +
+        "On the USG site an \"assembly\" is a community-focused student assembly in the Programming Department (BSA, QUASA, TSA...), a group — never a meeting or event — so assembly questions go to the knowledge base.",
       input: [...history, { role: "user", content: message }],
       tools: AGENT_TOOLS,
       tool_choice: "required",
@@ -1068,11 +1084,21 @@ function dedupSources(matches) {
   return Array.from(byUrl.values());
 }
 
+// Bare "assembly" embeds toward Senate/legislative pages; on the USG site it
+// means a Programming Department community assembly. Bias retrieval only —
+// the model still answers from the user's actual message.
+function retrievalQuery(message) {
+  return /\bassembl(y|ies)\b/i.test(message)
+    ? `${message}\n(USG Programming Department community-focused student assemblies)`
+    : message;
+}
+
 // Shared RAG prep: embed -> retrieve -> rerank -> prompt + deduped sources.
 // Throws err with .status when the KB is empty.
 async function ragPrepare(message, trace) {
   let t = new Date();
-  const queryEmbedding = await embed(message);
+  const query = retrievalQuery(message);
+  const queryEmbedding = await embed(query);
   trace?.span({
     name: "embed",
     startTime: t,
@@ -1107,7 +1133,7 @@ async function ragPrepare(message, trace) {
 
   if (RERANK) {
     t = new Date();
-    matches = await rerank(message, matches, 4);
+    matches = await rerank(query, matches, 4);
     trace?.span({
       name: "rerank",
       startTime: t,
@@ -1450,10 +1476,12 @@ module.exports = {
   fetchIcsEvents,
   parseIcsDate,
   expandSiblings,
+  retrievalQuery,
   hasTutorOfferLanguage,
   HOMEWORK_REPLY,
   SAFETY_REPLY,
   DIRECTORY,
+  AGENT_TOOLS,
   agentGraph,
   pool,
 };
