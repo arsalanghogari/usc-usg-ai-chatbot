@@ -5,6 +5,7 @@ const assert = require("node:assert");
 // override pre-set vars).
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-key";
 process.env.SUPABASE_DB_URL = "";
+process.env.ROSTER_PUB_URL = ""; // no roster fetch in tests
 process.env.LANGFUSE_SECRET_KEY = "";
 process.env.LANGFUSE_PUBLIC_KEY = "";
 
@@ -140,6 +141,56 @@ test("expandSiblings pulls whole pages in order, keeps picked scores", async () 
   assert.deepEqual(out.map((c) => c.chunk_index), page.map((c) => c.chunk_index));
   assert.equal(out.find((c) => c.chunk_index === pick.chunk_index).score, 0.91);
   assert.ok(out.every((c) => !c.embedding)); // no embeddings leaked into context
+});
+
+// The roster sheet is the authority for who holds which role. Tabs disagree
+// about column order, some leave headers blank, and the same person is listed
+// under every committee they sit on.
+test("parseRosterTab reads columns by label and carries section headings", () => {
+  const { parseRosterTab } = require("../server.js");
+  // a tab shaped like the Judicial one: blank headers, labels in row 1
+  const csv = [
+    ",Name,,Pronouns,Email",
+    "Judicial Council,,Office Hours,,",
+    "Chief Justice,Julian Gajewski,T 2-5 PM,He/him,gajewski@usc.edu",
+    "Justice,Ada Okafor,,she/her,okafor@usc.edu",
+  ].join("\n");
+  const rows = parseRosterTab(csv, "Judicial");
+  assert.equal(rows.length, 2, "section heading row must not become a person");
+  assert.equal(rows[0].name, "Julian Gajewski");
+  assert.equal(rows[0].hours, "T 2-5 PM", "office hours label sat in row 1, not the header");
+  assert.equal(rows[0].email, "gajewski@usc.edu");
+  assert.match(rows[0].title, /Judicial Council/, "section heading belongs in the title");
+  assert.equal(rows[0].department, "Judicial");
+});
+
+test("mergeRoster folds a person's repeated committee rows into one record", () => {
+  const { mergeRoster } = require("../server.js");
+  const merged = mergeRoster([
+    { name: "Diane Kim", title: "Vice President", department: "Executive", pronouns: "she/her", email: "usgvp@usc.edu", hours: "M 1-6pm", other: "" },
+    { name: "Diane Kim", title: "Vice President (Judicial Appointments)", department: "Judicial", pronouns: "", email: "", hours: "", other: "" },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].titles.length, 2);
+  assert.deepEqual(merged[0].departments, ["Executive", "Judicial"]);
+  assert.equal(merged[0].hours, "M 1-6pm", "detail from the fuller row survives");
+});
+
+test("matchOfficers handles typos and nicknames, and stays quiet otherwise", () => {
+  const { matchOfficers } = require("../server.js");
+  const people = [
+    { name: "Madison Troup", titles: ["Speaker of the Senate"], departments: ["Executive"], hours: "", email: "", pronouns: "", other: "" },
+    { name: "Abigail Mann", titles: ["Co-Executive Director of QuASA"], departments: ["Programming"], hours: "", email: "", pronouns: "", other: "" },
+    { name: "Jashan Dalal", titles: ["APASA Advocacy Liaison"], departments: ["Advocacy"], hours: "", email: "", pronouns: "", other: "" },
+    { name: "Jashan Grewal", titles: ["Chair of the Committee on External Affairs"], departments: ["Legislative"], hours: "", email: "", pronouns: "", other: "" },
+  ];
+  const names = (q) => matchOfficers(q, people).map((p) => p.name);
+  assert.deepEqual(names("Who is Madison Tw"), ["Madison Troup"], "truncated surname");
+  assert.deepEqual(names("Who is Abi Mann?"), ["Abigail Mann"], "shortened first name");
+  assert.deepEqual(names("who is jashan dalal"), ["Jashan Dalal"], "a full-name hit suppresses the other Jashan");
+  assert.deepEqual(names("who is the chair of external affairs"), ["Jashan Grewal"], "role phrased loosely");
+  assert.deepEqual(names("how many committees are there?"), [], "generic role words match nobody");
+  assert.deepEqual(names("how do I apply for funding"), []);
 });
 
 // The August failure this exists to prevent: a bare name is nearly meaningless
