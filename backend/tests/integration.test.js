@@ -74,6 +74,7 @@ before(async () => {
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://localhost:${mock.address().port}/v1`;
   process.env.SUPABASE_DB_URL = "";
+process.env.ROSTER_PUB_URL = ""; // no roster fetch in tests
   process.env.LANGFUSE_SECRET_KEY = "";
   process.env.LANGFUSE_PUBLIC_KEY = "";
   process.env.RERANK = "0"; // deterministic single-stage retrieval in tests

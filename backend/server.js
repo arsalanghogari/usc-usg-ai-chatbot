@@ -1048,6 +1048,272 @@ function parseCsv(text) {
   return rows;
 }
 
+// ---- Officer roster: the live staff-maintained sheet ---------------------
+// USG staff keep people, titles, pronouns, emails and office hours in a
+// published Google Sheet. The website roster is downstream of whoever
+// remembers to update the site, which is how the August grading produced a
+// bot that invented pronouns and handed people roles from old press releases.
+// The sheet is the authority for who holds which role today.
+//
+// One published sheet exports ONE tab per CSV URL, so the tab list is read
+// from the document page and each tab fetched by gid. Tabs disagree about
+// column order and some leave headers blank, so columns are resolved by label
+// rather than position.
+const ROSTER_PUB_URL =
+  process.env.ROSTER_PUB_URL ||
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI3xeufwaDE_M_bJUnjn82i53JnGfJwcQHCKq_rBb2TbzERB5OPEJI7Y5YOsOm7YcWBy_zXItcWNSZ/pub";
+const ROSTER_TTL_MS = 5 * 60 * 1000;
+const ROSTER_LABELS = new Set([
+  "position", "name", "pronouns", "email", "office hours", "other positions", "additional notes",
+]);
+let rosterCache = { at: 0, people: [], refreshing: false };
+
+function discoverRosterTabs(html) {
+  return [...html.matchAll(/items\.push\(\{name: "([^"]+)"[\s\S]{0,400}?gid: "(\d+)"/g)].map((m) => ({
+    name: m[1],
+    gid: m[2],
+  }));
+}
+
+// A group heading worth keeping next to a title ("Senator" is not one).
+const GROUPISH = /committee|assembly|board|team|council|liaison|cabinet|department|senate\b/i;
+
+function parseRosterTab(csv, tab) {
+  const table = parseCsv(csv).filter((r) => r.length > 1);
+  if (!table.length) return [];
+  const width = Math.max(...table.map((r) => r.length));
+  // a label may sit in the header row or, on some tabs, in the row below it
+  const label = {};
+  for (let i = 0; i < width; i++) {
+    for (const row of table.slice(0, 2)) {
+      const v = (row[i] || "").trim().toLowerCase();
+      if (ROSTER_LABELS.has(v) && !Object.values(label).includes(v)) {
+        label[i] = v;
+        break;
+      }
+    }
+  }
+  if (!Object.values(label).includes("position")) label[0] = "position";
+  if (!Object.values(label).includes("name")) label[1] = "name";
+  const idx = Object.fromEntries(Object.entries(label).map(([i, v]) => [v, Number(i)]));
+  const cell = (row, key) => (key in idx ? (row[idx[key]] || "").trim() : "");
+
+  const out = [];
+  let section = "";
+  for (const row of table.slice(1)) {
+    const name = cell(row, "name");
+    const position = cell(row, "position");
+    if (!name) {
+      // a heading row: names the group the rows beneath it belong to
+      if (position && !ROSTER_LABELS.has(position.toLowerCase())) section = position;
+      continue;
+    }
+    const title =
+      section && GROUPISH.test(section) && !position.toLowerCase().includes(section.toLowerCase())
+        ? `${position} (${section})`
+        : position;
+    out.push({
+      name,
+      title,
+      department: tab,
+      pronouns: cell(row, "pronouns"),
+      email: cell(row, "email"),
+      hours: cell(row, "office hours"),
+      other: cell(row, "other positions"),
+    });
+  }
+  return out;
+}
+
+function mergeRoster(rows) {
+  const byName = new Map();
+  for (const r of rows) {
+    const key = r.name.toLowerCase();
+    const p =
+      byName.get(key) ||
+      { name: r.name, titles: [], departments: [], pronouns: "", email: "", hours: "", other: "" };
+    if (r.title && !p.titles.includes(r.title)) p.titles.push(r.title);
+    if (r.department && !p.departments.includes(r.department)) p.departments.push(r.department);
+    p.pronouns ||= r.pronouns;
+    p.email ||= r.email;
+    p.hours ||= r.hours;
+    p.other ||= r.other;
+    byName.set(key, p);
+  }
+  return [...byName.values()];
+}
+
+async function fetchRoster() {
+  if (!ROSTER_PUB_URL) return []; // disabled (tests, or no sheet configured)
+  const page = await fetch(ROSTER_PUB_URL, { redirect: "follow", signal: AbortSignal.timeout(10000) });
+  if (!page.ok) throw new Error("roster page HTTP " + page.status);
+  const tabs = discoverRosterTabs(await page.text());
+  // a single-tab publish has no tab list; fall back to the default export
+  const targets = tabs.length ? tabs : [{ name: "Roster", gid: null }];
+  const rows = await Promise.all(
+    targets.map(async (t) => {
+      const url = t.gid
+        ? `${ROSTER_PUB_URL}?gid=${t.gid}&single=true&output=csv`
+        : `${ROSTER_PUB_URL}?output=csv`;
+      const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(10000) });
+      if (!r.ok) throw new Error(`${t.name} HTTP ${r.status}`);
+      return parseRosterTab(await r.text(), t.name);
+    })
+  );
+  return mergeRoster(rows.flat());
+}
+
+async function loadRoster() {
+  const fresh = Date.now() - rosterCache.at < ROSTER_TTL_MS;
+  if (rosterCache.people.length && fresh) return rosterCache.people;
+  // serve the stale copy and revalidate behind it: 9 HTTP round trips must
+  // never land in a student's response time
+  if (rosterCache.people.length && !rosterCache.refreshing) {
+    rosterCache.refreshing = true;
+    fetchRoster()
+      .then((people) => {
+        if (people.length) rosterCache = { at: Date.now(), people, refreshing: false };
+        else rosterCache.refreshing = false;
+      })
+      .catch((e) => {
+        console.warn("officer roster refresh failed, keeping last copy:", e.message);
+        rosterCache.refreshing = false;
+      });
+    return rosterCache.people;
+  }
+  try {
+    const people = await fetchRoster();
+    if (people.length) rosterCache = { at: Date.now(), people, refreshing: false };
+  } catch (e) {
+    console.warn("officer roster fetch failed:", e.message);
+  }
+  return rosterCache.people;
+}
+
+// Bounded edit distance — students type "Syrabj" for Syrabi and "Madison Tw"
+// for Madison Troup, which neither embeddings nor full-text search can match.
+function editDistance(a, b, max = 2) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    if (Math.min(...cur) > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+// Role words too common to identify anyone on their own.
+const GENERIC_ROLE_WORDS = new Set([
+  "chair", "director", "member", "officer", "assistant", "associate", "executive",
+  "deputy", "senior", "aide", "committee", "department", "assembly", "coordinator",
+]);
+
+function matchOfficers(message, people, limit = 4) {
+  const text = ` ${String(message).toLowerCase().replace(/[^a-z0-9\s'-]/g, " ").replace(/\s+/g, " ").trim()} `;
+  const tokens = text.trim().split(" ");
+  const hits = [];
+  for (const p of people) {
+    const parts = p.name.toLowerCase().split(/\s+/);
+    let score = 0;
+    if (text.includes(` ${p.name.toLowerCase()} `)) score = 4;
+    else if (parts.length > 1 && parts.every((x) => text.includes(` ${x} `))) score = 3;
+    else if (parts.some((x) => x.length >= 6 && text.includes(` ${x} `))) score = 2;
+    else if (
+      parts.some(
+        (x) =>
+          x.length >= 6 &&
+          tokens.some((t) => t.length >= 5 && editDistance(t, x) <= (x.length >= 8 ? 2 : 1))
+      )
+    )
+      score = 1;
+    if (score < 3 && parts.length > 1) {
+      // "Abi Mann" for Abigail Mann: a shortened first name next to the surname.
+      // Surnames are often too short for the standalone rules above.
+      const last = parts[parts.length - 1];
+      for (let i = 0; i < tokens.length - 1; i++) {
+        if (tokens[i].length >= 3 && parts[0].startsWith(tokens[i]) && tokens[i + 1] === last) {
+          score = 3;
+          break;
+        }
+      }
+    }
+    if (!score) {
+      // titles, for "who is the speaker of the senate" or "president office hours".
+      // 9 characters keeps "president" in and one-word noise out.
+      const titles = p.titles.map((x) => x.toLowerCase().split(" (")[0]);
+      if (titles.some((x) => x.length >= 9 && text.includes(` ${x} `))) score = 2;
+    }
+    if (!score) {
+      // Students phrase roles loosely: "chair of external affairs" for
+      // "Chair of the Committee on External Affairs". Match on shared words,
+      // but require one that is not a generic role word, so "how many
+      // committees are there" matches nobody.
+      const seen = new Set(tokens);
+      for (const raw of p.titles) {
+        const words = raw.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((x) => x.length >= 4);
+        const shared = words.filter((x) => seen.has(x));
+        if (shared.length >= 2 && shared.some((x) => !GENERIC_ROLE_WORDS.has(x))) {
+          score = 2;
+          break;
+        }
+      }
+    }
+    if (score) hits.push({ p, score });
+  }
+  // A confident hit suppresses the weak ones: pinning Jashan Grewal beside
+  // Jashan Dalal is how the bot conflated them in the first place.
+  const best = Math.max(0, ...hits.map((h) => h.score));
+  return hits
+    .filter((h) => (best >= 3 ? h.score >= 3 : true))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((h) => h.p);
+}
+
+function officerLines(people) {
+  return people
+    .map((p) =>
+      [
+        `${p.name}${p.pronouns ? ` (${p.pronouns})` : ""} — ${p.titles.join("; ")}` +
+          (p.departments.length ? ` [${p.departments.join(", ")}]` : ""),
+        p.email ? `email: ${p.email}` : null,
+        p.hours ? `office hours:\n${p.hours}` : null,
+        p.other ? `also: ${p.other.replace(/\n/g, "; ")}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+    .join("\n\n");
+}
+
+// The roster text to pin into context, or null when nothing matched.
+async function officerContext(message, trace) {
+  const t = new Date();
+  let people = [];
+  try {
+    const roster = await loadRoster();
+    people = matchOfficers(message, roster);
+    // "what are office hours?" names nobody. 115 people have hours; the ones
+    // a student means are the officers with a public office.
+    if (!people.length && /office hours?/i.test(message)) {
+      people = roster.filter((p) => p.hours && p.departments.includes("Executive")).slice(0, 10);
+    }
+  } catch (e) {
+    console.warn("officer lookup failed:", e.message);
+  }
+  trace?.span({
+    name: "officer_roster",
+    startTime: t,
+    endTime: new Date(),
+    output: { matched: people.map((p) => p.name) },
+  });
+  return people.length ? officerLines(people) : null;
+}
+
 // Live project-tracker counterpart of ragPrepare. The static page HTML
 // carries stale snapshot numbers (the widget renders live), so project
 // questions must come from the tracker's own published Google Sheet.
@@ -1269,14 +1535,20 @@ async function ragPrepare(message, trace) {
   });
 
   const today = new Date().toISOString().slice(0, 10);
-  const context = matches
-    .map(
-      (chunk, idx) =>
-        `[${idx + 1}] ${chunk.source_title}` +
-        (chunk.source_modified ? ` (page last updated: ${chunk.source_modified.slice(0, 10)})` : "") +
-        `\n${chunk.source_url}\n${chunk.text}`
-    )
-    .join("\n\n");
+  const officers = await officerContext(message, trace);
+  const parts = matches.map(
+    (chunk, idx) =>
+      `[${idx + 1}] ${chunk.source_title}` +
+      (chunk.source_modified ? ` (page last updated: ${chunk.source_modified.slice(0, 10)})` : "") +
+      `\n${chunk.source_url}\n${chunk.text}`
+  );
+  if (officers) {
+    parts.push(
+      `[${parts.length + 1}] USG Officer Roster & Office Hours (live sheet, maintained by USG staff)` +
+        `\n${ROSTER_PUB_URL}\n${officers}`
+    );
+  }
+  const context = parts.join("\n\n");
 
   const instructions = `
         Today's date is ${today}.
@@ -1291,6 +1563,8 @@ async function ragPrepare(message, trace) {
 
         Keep the conversation natural and context-aware.
 
+        When the USG Officer Roster source is present, it is the live sheet USG staff maintain: prefer it over page text for who currently holds a role, their pronouns, email and office hours, and say so plainly if a page disagrees. A person missing from it may still hold a USG role described elsewhere in the context, so treat a miss as "not on the roster", never as "not in USG". Never state pronouns the roster does not list — use the person's name instead.
+
         Use the knowledge base for factual USC/USG information. State only facts found in the context — do not fill gaps from general knowledge, and do not attribute to a resource anything the context does not say about it. In particular, never give an email address, phone number, meeting time, room/location, dollar amount, deadline, URL, or person's name/title unless it appears in the context — a plausible guess at a contact detail is worse than none. Never repeat, link, or help construct a URL that appears only in the user's message or the conversation history — the only URLs in your answers should come from the context. If asked for a specific detail the context lacks, say you don't have it and link the most relevant USG page instead.
 
         If the knowledge base truly does not contain enough information, say so plainly.
@@ -1301,6 +1575,16 @@ async function ragPrepare(message, trace) {
       `;
 
   const sources = dedupSources(matches);
+  if (officers) {
+    sources.unshift({
+      source_title: "USG Officer Roster & Office Hours",
+      source_url: ROSTER_PUB_URL,
+      score: 1,
+      source_modified: null,
+      source_modified_year: null,
+      evergreen: true, // a live feed is never stale; no staleness notice for it
+    });
+  }
   const { notice } = assessFreshness(sources);
   const userContent = `<context>\n${context}\n</context>\n\nCurrent user message:\n${message}`;
 
@@ -1593,6 +1877,13 @@ module.exports = {
   parseIcsDate,
   expandSiblings,
   retrievalQuery,
+  parseRosterTab,
+  mergeRoster,
+  discoverRosterTabs,
+  matchOfficers,
+  officerContext,
+  loadRoster,
+  officerLines,
   rrfFuse,
   HYBRID,
   hasTutorOfferLanguage,
