@@ -63,7 +63,7 @@
 
   { "q": "Who is Arsalan Ghogari?", "expected": "https://usg.usc.edu/meet-our-team-communications/" },
   { "q": "Who is the USG director of digital strategy?", "expected": "https://usg.usc.edu/meet-our-team-communications/" },
-  { "q": "Who is Mikaela Bautista?", "expected": ["https://usg.usc.edu/meet-our-team-executive-cabinet/", "https://usg.usc.edu/executive-branch/"] },
+  { "q": "Who is Mikaela Bautista?", "expected": ["https://usg.usc.edu/branches/senate/", "https://usg.usc.edu/blog/2024/09/24/9540/"] },
   { "q": "Who is Zachary Garcia?", "expected": ["https://usg.usc.edu/blog/2025/10/13/fall-2025-senate-special-elections-result/", "https://usg.usc.edu/meet-our-team-legislative/"] },
   { "q": "who is jashan dalal", "expected": ["https://usg.usc.edu/meet-our-team-legislative/meet-our-team-advocacy-liaisons/", "https://usg.usc.edu/branches/advocacy/"] },
   { "q": "how many advocacy liaisons are there?", "expected": ["https://usg.usc.edu/meet-our-team-legislative/meet-our-team-advocacy-liaisons/", "https://usg.usc.edu/branches/advocacy/"] },

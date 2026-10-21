@@ -32,3 +32,5 @@
 {"ts":"2026-10-20T23:32:48.163Z","git":"8a9b7a1","backend":"pgvector","hybrid":true,"rerank":true,"k":4,"n":60,"hit_rate":0.9,"mrr":0.856,"faithfulness":0.967}
 {"ts":"2026-10-21T01:12:10.903Z","git":"8a9b7a1","kind":"tool-selection","n":30,"tool_accuracy":1,"wrong_tool_rate":0}
 {"ts":"2026-10-21T01:21:04.690Z","git":"8a9b7a1","backend":"pgvector","hybrid":true,"rerank":true,"k":4,"n":60,"hit_rate":0.9,"mrr":0.847,"faithfulness":0.983}
+{"ts":"2026-10-21T08:50:48.509Z","git":"f779a41","backend":"pgvector","hybrid":true,"rerank":true,"k":4,"n":60,"hit_rate":0.9,"mrr":0.858,"faithfulness":0.933,"correctness":0.95}
+{"ts":"2026-10-21T21:35:26.994Z","git":"f779a41","kind":"tool-selection","n":30,"tool_accuracy":0.967,"wrong_tool_rate":0.033}
