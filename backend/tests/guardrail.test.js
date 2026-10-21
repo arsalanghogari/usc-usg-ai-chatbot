@@ -238,7 +238,7 @@ test("menstrual questions get USG's product map AND Student Health", async () =>
   const { body } = await chat({ message: "where can I get a free tampon on campus?" });
   assert.ok(body.answer.includes("menstrual-product-map"), "product map missing");
   assert.ok(body.answer.includes("https://studenthealth.usc.edu"), "Student Health missing");
-  assert.ok(!body.answer.includes("outside what I can help with"), "the map IS a USG resource");
+  assert.ok(!body.answer.includes("I can't help with this one"), "the map IS a USG resource");
   assert.equal(body.sources.length, 2);
 });
 

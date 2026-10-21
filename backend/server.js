@@ -420,9 +420,11 @@ function topChunks(queryEmbedding, chunks, k = 4, text = null) {
 // Fixed text is the point: nothing here is generated, so nothing can be
 // improvised. Contacts must be verified against an official page.
 function outOfScopeReply(resource, contact) {
+  // the resource opens its own sentence: "the USC Registrar" -> "The USC Registrar"
+  const name = resource[0].toUpperCase() + resource.slice(1);
   return (
-    "Ask USG answers questions about USC Undergraduate Student Government: funding, events, projects, and who to contact. " +
-    `Your question is outside what I can help with, but **${resource}** can: **${contact}**.`
+    "I'm sorry I can't help with this one. Ask USG only answers questions about USC Undergraduate Student Government, " +
+    `like funding, events, projects, and who to contact. **${name}** can help: **${contact}**.`
   );
 }
 
