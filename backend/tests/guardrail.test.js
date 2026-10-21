@@ -39,6 +39,7 @@ const mock = http.createServer((req, res) => {
         if (userText.includes("essay")) name = "redirect_academic_help";
         else if (userText.includes("harass")) name = "redirect_safety_report";
         else if (userText.includes("capital of")) name = "redirect_off_topic";
+        else if (/suicide|kill myself|what's the point/.test(userText)) name = "redirect_wellbeing";
         else if (userText.includes("housing")) {
           name = "redirect_campus_office";
           args = JSON.stringify({ office: "housing" });
@@ -172,29 +173,50 @@ test("tutor-offer detector stays quiet on normal USG answers", () => {
 test("essay request routes to the canned referral without generation", async () => {
   const { status, body } = await chat({ message: "Can you help me write my history essay?" });
   assert.equal(status, 200);
-  assert.equal(body.crisis, false);
   assert.equal(body.answer, server.HOMEWORK_REPLY);
   assert.ok(body.sources.some((s) => s.source_url.includes("resources-guides")));
 });
 
-// The 2026-10-21 widget report: after "im having thoughts of suicide", an
-// essay request got the crisis reply. Only the current message is checked
-// for crisis now, so earlier turns never decide the reply.
-const CRISIS_HISTORY = [
-  { role: "user", content: "im having thoughts of suicide" },
-  { role: "assistant", content: "I'm sorry I can't help with this one." },
-];
+// ---- wellbeing: an ordinary route with the fixed counseling + 988 reply ----
 
-test("after a crisis turn, a request with its own fixed reply gets that reply", async () => {
-  const { body } = await chat({ message: "can you help me write my essay", history: CRISIS_HISTORY });
-  assert.equal(body.crisis, false);
-  assert.equal(body.answer, server.HOMEWORK_REPLY);
+test("wellbeing route gets the fixed counseling + 988 reply, never generated", async () => {
+  const { body } = await chat({ message: "im having thoughts of suicide" });
+  assert.equal(body.answer, server.CRISIS_REPLY);
+  assert.ok(body.sources.some((s) => s.source_url.includes("988")));
+  assert.ok(!body.sources.some((s) => s.source_url.includes("usg.usc.edu")), "no KB leakage");
 });
 
-test("crisis language in the current message still wins over its route", async () => {
-  const { body } = await chat({ message: "I want to kill myself, can you write my essay", history: [] });
-  assert.equal(body.crisis, true);
-  assert.equal(body.answer, server.CRISIS_REPLY);
+test("wellbeing replies are never traced, so they get no feedback buttons", async () => {
+  const { body } = await chat({ message: "im having thoughts of suicide" });
+  assert.equal(body.traceId, null);
+});
+
+test("wellbeing streams like any fixed reply: one replace event, no deltas", async () => {
+  const r = await fetch(`${api}/api/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "im having thoughts of suicide" }),
+  });
+  const events = (await r.text())
+    .split("\n\n")
+    .filter((p) => p.startsWith("data: "))
+    .map((p) => JSON.parse(p.slice(6)));
+  assert.ok(!events.some((e) => e.delta));
+  assert.equal(events.find((e) => e.replace).answer, server.CRISIS_REPLY);
+  assert.ok(events.at(-1).done);
+});
+
+// The 2026-10-21 widget report: after "im having thoughts of suicide", an
+// essay request got the crisis reply. The router decides each message.
+test("after a wellbeing turn, an essay request gets the Writing Center reply", async () => {
+  const { body } = await chat({
+    message: "can you help me write my essay",
+    history: [
+      { role: "user", content: "im having thoughts of suicide" },
+      { role: "assistant", content: "I'm sorry I can't help with this one." },
+    ],
+  });
+  assert.equal(body.answer, server.HOMEWORK_REPLY);
 });
 
 test("normal question still routes to the KB", async () => {
@@ -216,7 +238,6 @@ test("output rail replaces a generated tutor-offer with the canned referral", as
 
 test("safety report routes to verified contacts without generation", async () => {
   const { body } = await chat({ message: "How do I report harassment by another student?" });
-  assert.equal(body.crisis, false);
   assert.equal(body.answer, server.SAFETY_REPLY);
   assert.ok(body.answer.includes("(213) 740-4321"), "DPS number missing");
   assert.ok(body.answer.includes("911"), "911 missing");
@@ -246,7 +267,6 @@ test("coursework, other-office, safety, crisis and off-topic replies share one t
 
 test("off-topic question gets the fixed reply with no sources", async () => {
   const { body } = await chat({ message: "what is the capital of France" });
-  assert.equal(body.crisis, false);
   assert.equal(body.answer, server.OFF_TOPIC_REPLY);
   assert.equal(body.sources.length, 0);
 });
@@ -255,7 +275,6 @@ test("off-topic question gets the fixed reply with no sources", async () => {
 
 test("campus-office question routes to the office's official site", async () => {
   const { body } = await chat({ message: "How do I apply for USC housing?" });
-  assert.equal(body.crisis, false);
   assert.equal(body.answer, server.outOfScopeReply("USC Housing", "https://housing.usc.edu"));
   assert.ok(body.sources.some((s) => s.source_url === "https://housing.usc.edu"));
 });

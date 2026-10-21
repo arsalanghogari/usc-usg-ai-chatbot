@@ -11,7 +11,6 @@ process.env.LANGFUSE_PUBLIC_KEY = "";
 
 const {
   cosineSimilarity,
-  hasCrisisKeywords,
   assessFreshness,
   dedupSources,
   parseChatBody,
@@ -22,15 +21,6 @@ test("cosineSimilarity", () => {
   assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
   assert.ok(Math.abs(cosineSimilarity([1, 2, 3], [1, 2, 3]) - 1) < 1e-9);
   assert.ok(cosineSimilarity([1, 0], [-1, 0]) < 0);
-});
-
-test("hasCrisisKeywords", () => {
-  assert.ok(hasCrisisKeywords("I want to kill myself"));
-  assert.ok(hasCrisisKeywords("thinking about suicide"));
-  assert.ok(hasCrisisKeywords("i dont want to be here anymore"));
-  assert.ok(hasCrisisKeywords("I do not want to live"));
-  assert.ok(!hasCrisisKeywords("when is the next senate meeting?"));
-  assert.ok(!hasCrisisKeywords("this deadline is killing me")); // no false positive
 });
 
 test("assessFreshness", () => {

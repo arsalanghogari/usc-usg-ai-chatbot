@@ -105,17 +105,9 @@ async function chat(payload) {
 test("normal question returns answer + sources from kb.json", async () => {
   const { status, body } = await chat({ message: "How do I get funding?" });
   assert.equal(status, 200);
-  assert.equal(body.crisis, false);
   assert.ok(body.answer.startsWith("MOCK ANSWER"));
   assert.ok(Array.isArray(body.sources) && body.sources.length > 0);
   assert.ok(body.sources[0].source_url.startsWith("https://"));
-});
-
-test("crisis keywords route to crisis payload with 988 sources", async () => {
-  const { status, body } = await chat({ message: "I want to kill myself" });
-  assert.equal(status, 200);
-  assert.equal(body.crisis, true);
-  assert.ok(body.sources.some((s) => s.source_url.includes("988")));
 });
 
 test("empty and oversized messages are rejected", async () => {
