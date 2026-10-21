@@ -419,13 +419,27 @@ function topChunks(queryEmbedding, chunks, k = 4, text = null) {
 // gets this one fixed template; only the resource and its contact change.
 // Fixed text is the point: nothing here is generated, so nothing can be
 // improvised. Contacts must be verified against an official page.
+const OUT_OF_SCOPE_OPENING =
+  "I'm sorry I can't help with this one. Ask USG only answers questions about USC Undergraduate Student Government, " +
+  "like funding, events, projects, and who to contact.";
+
 function outOfScopeReply(resource, contact) {
   // the resource opens its own sentence: "the USC Registrar" -> "The USC Registrar"
   const name = resource[0].toUpperCase() + resource.slice(1);
-  return (
-    "I'm sorry I can't help with this one. Ask USG only answers questions about USC Undergraduate Student Government, " +
-    `like funding, events, projects, and who to contact. **${name}** can help: **${contact}**.`
-  );
+  return `${OUT_OF_SCOPE_OPENING} **${name}** can help: **${contact}**.`;
+}
+
+// Nothing to do with USG or any USC office ("capital of France", car repair):
+// no USC resource fits, so the opening alone. Before this route existed,
+// such questions fell through to the knowledge base (answered "Paris." from
+// the model's own knowledge) or the nearest redirect (a car question got the
+// Writing Center).
+const OFF_TOPIC_REPLY = OUT_OF_SCOPE_OPENING;
+
+function offTopicPrepare(trace) {
+  const t = new Date();
+  trace?.span({ name: "off_topic_redirect", startTime: t, endTime: new Date() });
+  return { direct: OFF_TOPIC_REPLY, sources: [], instructions: "", userContent: "", notice: "" };
 }
 
 // 213-740-9355 (WELL): sites.usc.edu/counselingandmentalhealth ("Need
@@ -715,6 +729,19 @@ const AGENT_TOOLS = [
   },
   {
     type: "function",
+    name: "redirect_off_topic",
+    strict: true,
+    description:
+      "The question has nothing to do with USC Undergraduate Student Government or with any USC office: general knowledge or trivia, math or science facts, coding, cooking, car or tech repair, other universities, news and current events, sports scores, or chit-chat that asks for something outside USG. Route here for a fixed reply that Ask USG only covers USG. NOT for anything about USG, even an unfamiliar or oddly named committee, assembly, event, person or program — unknown USG names go to the knowledge base, which says honestly what it doesn't have. NOT for producing coursework (redirect_academic_help), another USC office (redirect_campus_office), or safety situations (redirect_safety_report).",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "get_upcoming_events",
     strict: true,
     description:
@@ -760,6 +787,7 @@ async function routeTool(message, history, trace) {
           redirect_academic_help: "homework",
           redirect_safety_report: "safety",
           redirect_campus_office: "directory",
+          redirect_off_topic: "offtopic",
         }[call?.name] || "kb",
       args,
     };
@@ -1348,6 +1376,9 @@ const agentGraph = new StateGraph(AgentState)
   .addNode("safety", async (s) => ({
     prepared: safetyPrepare(s.trace),
   }))
+  .addNode("offtopic", async (s) => ({
+    prepared: offTopicPrepare(s.trace),
+  }))
   .addNode("directory", async (s) => ({
     prepared: directoryPrepare(s.route.args, s.trace),
   }))
@@ -1359,6 +1390,7 @@ const agentGraph = new StateGraph(AgentState)
     homework: "homework",
     safety: "safety",
     directory: "directory",
+    offtopic: "offtopic",
   })
   .addEdge("kb", END)
   .addEdge("events", END)
@@ -1366,6 +1398,7 @@ const agentGraph = new StateGraph(AgentState)
   .addEdge("homework", END)
   .addEdge("safety", END)
   .addEdge("directory", END)
+  .addEdge("offtopic", END)
   .compile();
 
 async function agentPrepare(message, history, trace) {
@@ -1792,6 +1825,7 @@ module.exports = {
   isCrisisMessage,
   outOfScopeReply,
   CRISIS_REPLY,
+  OFF_TOPIC_REPLY,
   cosineSimilarity,
   dedupSources,
   parseChatBody,

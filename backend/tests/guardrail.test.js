@@ -38,6 +38,7 @@ const mock = http.createServer((req, res) => {
         let args = "{}";
         if (userText.includes("essay")) name = "redirect_academic_help";
         else if (userText.includes("harass")) name = "redirect_safety_report";
+        else if (userText.includes("capital of")) name = "redirect_off_topic";
         else if (userText.includes("housing")) {
           name = "redirect_campus_office";
           args = JSON.stringify({ office: "housing" });
@@ -228,9 +229,10 @@ test("safety reply passes the other guardrails' own checks", () => {
 
 // ---- one out-of-scope template for every category -------------------------
 
-test("coursework, other-office, safety and crisis replies share one template", () => {
-  const head = server.outOfScopeReply("X", "Y").split("**X**")[0];
+test("coursework, other-office, safety, crisis and off-topic replies share one template", () => {
+  const head = server.outOfScopeReply("X", "Y").split("**X**")[0].trimEnd();
   for (const reply of [
+    server.OFF_TOPIC_REPLY,
     server.HOMEWORK_REPLY,
     server.CRISIS_REPLY,
     server.SAFETY_REPLY,
@@ -238,6 +240,15 @@ test("coursework, other-office, safety and crisis replies share one template", (
   ]) {
     assert.ok(reply.startsWith(head), `off-template reply: ${reply}`);
   }
+});
+
+// ---- off-topic: fixed reply, no resource, never the model's own knowledge --
+
+test("off-topic question gets the fixed reply with no sources", async () => {
+  const { body } = await chat({ message: "what is the capital of France" });
+  assert.equal(body.crisis, false);
+  assert.equal(body.answer, server.OFF_TOPIC_REPLY);
+  assert.equal(body.sources.length, 0);
 });
 
 // ---- directory guardrail: right office, right link ------------------------

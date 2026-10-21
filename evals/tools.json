@@ -11,7 +11,6 @@
   { "q": "Is there a USG meeting tomorrow?", "tool": "events" },
   { "q": "Any concerts committee events soon?", "tool": "events" },
   { "q": "What time is the next USG event and where?", "tool": "events" },
-
   { "q": "How do I apply for funding for my club?", "tool": "kb" },
   { "q": "Who is the USG president?", "tool": "kb" },
   { "q": "What does the advocacy department do?", "tool": "kb" },
@@ -24,12 +23,18 @@
   { "q": "Which buildings have late night study rooms?", "tool": "directory" },
   { "q": "What assemblies are part of USG?", "tool": "kb" },
   { "q": "Is there an assembly for transfer students?", "tool": "kb" },
-
   { "q": "Where can I get free tampons on campus?", "tool": "directory" },
   { "q": "I just got my period and need a pad", "tool": "directory" },
-
   { "q": "What is TSA", "tool": "kb" },
   { "q": "I need help with my RSO app", "tool": "kb" },
   { "q": "How many committees are there?", "tool": "kb" },
-  { "q": "How many assemblies are there?", "tool": "kb" }
+  { "q": "How many assemblies are there?", "tool": "kb" },
+  { "q": "what is the capital of France", "tool": "offtopic" },
+  { "q": "how do I replace the transmission in my car", "tool": "offtopic" },
+  { "q": "who won the Lakers game last night", "tool": "offtopic" },
+  { "q": "give me a recipe for banana bread", "tool": "offtopic" },
+  { "q": "what does the USG Zorblax Committee do", "tool": "kb" },
+  { "q": "who is Jordan Ellison in USG", "tool": "kb" },
+  { "q": "does USG do anything about food insecurity", "tool": "kb" },
+  { "q": "what is QuASA", "tool": "kb" }
 ]
