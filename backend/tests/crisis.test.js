@@ -1,7 +1,7 @@
 // Crisis-pathway guardrail tests. A false negative here (a student in crisis
 // routed to the RAG chatbot instead of 988 resources) is the worst possible
 // failure of this system, so this file is deliberately exhaustive about the
-// deterministic layers: keyword net, history net, moderation wiring and its
+// deterministic layers: keyword net, moderation wiring and its
 // failure mode, and the fixed reply (nothing is ever generated for a crisis).
 //
 // The mock OpenAI server is content-keyed: sentinel strings in the user
@@ -14,7 +14,7 @@ const http = require("node:http");
 
 const MOD_FLAG = "please review my situation"; // moderation-flagged, no keywords
 const MOD_DOWN = "moderation outage probe"; // /moderations returns 500
-let generations = 0; // /responses calls: the crisis path must make none
+let generations = 0; // answer generations: the crisis path must make none
 
 const mock = http.createServer((req, res) => {
   let body = "";
@@ -44,7 +44,9 @@ const mock = http.createServer((req, res) => {
       );
     }
     if (req.url.includes("/responses")) {
-      generations++;
+      // the router's speculative call (it carries tools) runs alongside the
+      // crisis check; only a tool-less call would be a generated answer
+      if (!JSON.parse(text).tools) generations++;
       const out = "MOCK GENERATED ANSWER";
       return res.end(
         JSON.stringify({
@@ -160,19 +162,6 @@ test("keyword net does not fire on normal USG questions", () => {
   }
 });
 
-test("history net catches crisis language in earlier turns", () => {
-  assert.ok(
-    server.historySuggestsCrisis([
-      { role: "user", content: "I have no reason to live" },
-      { role: "assistant", content: "..." },
-    ])
-  );
-  assert.ok(server.historySuggestsCrisis([{ role: "user", content: "life is pointless" }]));
-  assert.ok(!server.historySuggestsCrisis([]));
-  assert.ok(!server.historySuggestsCrisis([{ role: "user", content: "how do I get funding" }]));
-  assert.ok(!server.historySuggestsCrisis([{ role: "user" }, {}])); // null-safe
-});
-
 // ---- the fixed reply: same out-of-scope template, crisis resources -------
 
 test("crisis reply is the shared out-of-scope template naming counseling and 988", () => {
@@ -231,17 +220,6 @@ test("moderation-flagged message routes to crisis end-to-end", async () => {
   const { body } = await chat({ message: MOD_FLAG });
   assert.equal(body.crisis, true);
   assert.ok(body.sources.some((s) => s.source_url.includes("988")));
-});
-
-test("crisis in history routes a vague follow-up to crisis", async () => {
-  const { body } = await chat({
-    message: "what's the point anymore",
-    history: [
-      { role: "user", content: "I feel like there is no reason to live" },
-      { role: "assistant", content: "I'm sorry you're hurting." },
-    ],
-  });
-  assert.equal(body.crisis, true);
 });
 
 test("crisis reply is fixed, never generated", async () => {

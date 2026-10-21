@@ -464,24 +464,6 @@ function hasCrisisKeywords(message) {
   return patterns.some((re) => re.test(text));
 }
 
-function historySuggestsCrisis(history) {
-  const combined = history
-    .map((m) => m?.content || "")
-    .join(" ")
-    .toLowerCase();
-
-  const patterns = [
-    /\bkill myself\b/i,
-    /\bwant to die\b/i,
-    /\bsuicid(e|al)\b/i,
-    /\bdon'?t want to live\b/i,
-    /\bno reason to live\b/i,
-    /\blife is pointless\b/i,
-  ];
-
-  return patterns.some((re) => re.test(combined));
-}
-
 async function isCrisisMessage(message) {
   if (hasCrisisKeywords(message)) return true;
 
@@ -509,19 +491,10 @@ async function isCrisisMessage(message) {
 // Returns the fixed crisis reply, or null if the message is not a crisis.
 // Detection only routes and picks the resource: nothing is generated, so a
 // student in distress can never get an improvised answer. Sent as one event,
-// never streamed.
-async function crisisPayload(message, history, preparedPromise) {
-  const payload = { crisis: true, answer: CRISIS_REPLY, sources: CRISIS_SOURCES };
-  if (await isCrisisMessage(message)) return payload;
-  if (!historySuggestsCrisis(history)) return null;
-  // Crisis is only in earlier turns. A vague follow-up ("what's the point")
-  // stays on the crisis reply, but a request the router gave its own fixed
-  // reply (an essay, another office) gets that reply: otherwise one crisis
-  // message turned every later question into the crisis reply. Never the
-  // safety reply, though: the router reads history too, and sent "what's the
-  // point anymore" there, pointing a student in distress at DPS.
-  const prepared = await preparedPromise;
-  return prepared?.direct && prepared.direct !== SAFETY_REPLY ? null : payload;
+// never streamed. Only the current message is checked, never earlier turns.
+async function crisisPayload(message) {
+  if (!(await isCrisisMessage(message))) return null;
+  return { crisis: true, answer: CRISIS_REPLY, sources: CRISIS_SOURCES };
 }
 
 // ---- Academic-work guardrail ---------------------------------------------
@@ -1620,7 +1593,7 @@ app.post("/api/chat", async (req, res) => {
     // Langfuse only honors at creation) is created after the crisis check.
     const trace = langfuse ? deferredTrace() : null;
     const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
-    const crisis = await crisisPayload(message, history, ragPromise);
+    const crisis = await crisisPayload(message);
     if (crisis) {
       // count-only marker; the buffered spans are discarded
       langfuse?.trace({ name: "crisis", tags: ["crisis"] });
@@ -1704,7 +1677,7 @@ app.post("/api/chat/stream", async (req, res) => {
     // Deferred like /api/chat: buffered spans, trace created post-verdict.
     const trace = langfuse ? deferredTrace() : null;
     const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
-    const crisis = await crisisPayload(message, history, ragPromise);
+    const crisis = await crisisPayload(message);
     if (crisis) {
       langfuse?.trace({ name: "crisis", tags: ["crisis"] }); // count-only
       langfuse?.flushAsync().catch(() => {});
@@ -1816,7 +1789,6 @@ module.exports = {
   topChunksDb,
   assessFreshness,
   hasCrisisKeywords,
-  historySuggestsCrisis,
   isCrisisMessage,
   outOfScopeReply,
   CRISIS_REPLY,
