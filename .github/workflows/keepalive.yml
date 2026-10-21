@@ -1,0 +1,18 @@
+name: Keep database awake
+
+# Supabase's free tier pauses a project after 7 days without DB activity, and
+# the weekly ingest lands just over 7 days apart: it paused on 2026-10-05 and
+# the bot failed every KB question for two weeks. /health/db runs a real
+# query, and returns 503 when the DB is down, so a failed run here (and
+# GitHub's failure email) is the outage alarm.
+on:
+  schedule:
+    - cron: "0 15 */3 * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      # --retry covers Render's cold start
+      - run: curl -fsS --retry 3 --retry-delay 30 --max-time 120 https://usg-chat-backend.onrender.com/health/db

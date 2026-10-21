@@ -59,11 +59,28 @@ async function pages(pathname, onPage) {
   }
 }
 
-// The bot answers from kb.json, so that is what "grounded" is measured against
-// (the whole page, not just the chunks that scored — the model saw siblings).
-const kbByUrl = {};
-for (const ch of JSON.parse(fs.readFileSync(path.join(__dirname, "..", "backend", "kb.json"), "utf-8")).chunks)
-  kbByUrl[ch.source_url] = (kbByUrl[ch.source_url] || "") + ch.text + "\n";
+const server = require("../backend/server.js");
+
+// Grounding is measured against whole pages from the live DB (the model saw
+// siblings, not just the chunks that scored) plus the officer roster, which
+// the bot gets as an extra source. ponytail: the roster is today's, not the
+// one at ask time; an officer change in between shows up as a false miss.
+async function pageText(urls) {
+  const { rows } = await server.pool.query(
+    `select source_url, max(source_modified) as modified,
+            string_agg(text, E'\n' order by chunk_index) as text
+     from chunks where source_url = any($1) group by source_url`,
+    [urls]
+  );
+  // same "page last updated" header the bot's prompt has, or the judge fails
+  // every answer that cites it
+  return Object.fromEntries(
+    rows.map((r) => [
+      r.source_url,
+      (r.modified ? `(page last updated: ${r.modified.toISOString().slice(0, 10)})\n` : "") + r.text,
+    ])
+  );
+}
 
 (async () => {
   if (!process.env.LANGFUSE_PUBLIC_KEY) {
@@ -72,7 +89,9 @@ for (const ch of JSON.parse(fs.readFileSync(path.join(__dirname, "..", "backend"
   }
   const traces = [];
   await pages(`/api/public/traces?fromTimestamp=${fromTs}&toTimestamp=${toTs}`, (d) =>
-    traces.push(...d.filter((t) => !String(t.sessionId).startsWith("syn-eval"))) // drop synthetic waves
+    // drop synthetic waves, and sessionless traces: the widget always sends a
+    // sessionId, so those are scripts (e.g. an old eval.js --judge run)
+    traces.push(...d.filter((t) => t.sessionId && !String(t.sessionId).startsWith("syn-eval")))
   );
   traces.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
@@ -98,9 +117,11 @@ for (const ch of JSON.parse(fs.readFileSync(path.join(__dirname, "..", "backend"
       const urls = [...new Set(sources[t.id] || [])].slice(0, 3);
       let row;
       try {
-        const context = urls.length
-          ? urls.map((u, i) => `[${i + 1}] ${u}\n${kbByUrl[u] ? kbByUrl[u].slice(0, 14000) : "(page text unavailable)"}`).join("\n\n")
-          : "(no sources cited)";
+        const kbByUrl = urls.length ? await pageText(urls) : {};
+        const parts = urls.map((u, i) => `[${i + 1}] ${u}\n${kbByUrl[u] ? kbByUrl[u].slice(0, 14000) : "(page text unavailable)"}`);
+        const officers = route === "kb" ? await server.officerContext(t.input) : null;
+        if (officers) parts.push(`[${parts.length + 1}] USG Officer Roster & Office Hours (live sheet)\n${officers}`);
+        const context = parts.length ? parts.join("\n\n") : "(no sources cited)";
         const out = await openai(
           RUBRIC,
           // the answer is history by the time it is graded: without the ask
@@ -133,6 +154,7 @@ for (const ch of JSON.parse(fs.readFileSync(path.join(__dirname, "..", "backend"
   for (const [k, [u, n]] of Object.entries(byRoute).sort((a, b) => b[1][1] - a[1][1]))
     console.log(`  ${k}: ${u}/${n} = ${Math.round((100 * u) / n)}%`);
   for (const r of results.filter((x) => x.value === 0)) console.log(`WRONG [${r.route}] ${r.q}\n      ${r.reason}`);
+  await server.pool?.end();
 })().catch((e) => {
   console.error(e);
   process.exit(1);
