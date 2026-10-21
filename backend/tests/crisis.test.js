@@ -2,7 +2,7 @@
 // routed to the RAG chatbot instead of 988 resources) is the worst possible
 // failure of this system, so this file is deliberately exhaustive about the
 // deterministic layers: keyword net, history net, moderation wiring and its
-// failure mode, and the disallowed-language guardrail on generated replies.
+// failure mode, and the fixed reply (nothing is ever generated for a crisis).
 //
 // The mock OpenAI server is content-keyed: sentinel strings in the user
 // message steer /moderations and /responses, so every branch is reachable
@@ -14,7 +14,7 @@ const http = require("node:http");
 
 const MOD_FLAG = "please review my situation"; // moderation-flagged, no keywords
 const MOD_DOWN = "moderation outage probe"; // /moderations returns 500
-const BAD_STYLE = "kill myself with bad style"; // crisis + disallowed generation
+let generations = 0; // /responses calls: the crisis path must make none
 
 const mock = http.createServer((req, res) => {
   let body = "";
@@ -44,9 +44,8 @@ const mock = http.createServer((req, res) => {
       );
     }
     if (req.url.includes("/responses")) {
-      const out = text.includes(BAD_STYLE)
-        ? "I can help — let me know what you would like to do next."
-        : "MOCK CRISIS ANSWER: please call or text 988.";
+      generations++;
+      const out = "MOCK GENERATED ANSWER";
       return res.end(
         JSON.stringify({
           id: "resp_mock",
@@ -174,31 +173,14 @@ test("history net catches crisis language in earlier turns", () => {
   assert.ok(!server.historySuggestsCrisis([{ role: "user" }, {}])); // null-safe
 });
 
-// ---- canned replies: the last line of defense must itself be safe ---------
+// ---- the fixed reply: same out-of-scope template, crisis resources -------
 
-test("every canned crisis reply mentions 988 and passes the style guardrail", () => {
-  for (const reply of server.CRISIS_REPLIES) {
-    assert.ok(reply.includes("988"), `canned reply missing 988: ${reply}`);
-    assert.ok(!server.hasDisallowedAssistantLanguage(reply), `canned reply fails own guardrail: ${reply}`);
-  }
-});
-
-test("pickCrisisReply is deterministic", () => {
-  assert.equal(server.pickCrisisReply("same input"), server.pickCrisisReply("same input"));
-});
-
-test("disallowed-language guardrail flags each banned pattern", () => {
-  for (const bad of [
-    "I can help you with that.",
-    "I'm here if you want to talk",
-    "Let me know how it goes.",
-    "What would you like to do next?",
-    "How can I help?",
-    "I can support you through this.",
-  ]) {
-    assert.ok(server.hasDisallowedAssistantLanguage(bad), `guardrail missed: ${bad}`);
-  }
-  assert.ok(!server.hasDisallowedAssistantLanguage("Please call or text 988 right now."));
+test("crisis reply is the shared out-of-scope template naming counseling and 988", () => {
+  assert.equal(
+    server.CRISIS_REPLY,
+    server.outOfScopeReply("USC Counseling & Mental Health", "213-740-9355, or call or text 988")
+  );
+  assert.ok(server.CRISIS_REPLY.includes("988"));
 });
 
 // ---- moderation wiring and its failure mode -------------------------------
@@ -262,9 +244,9 @@ test("crisis in history routes a vague follow-up to crisis", async () => {
   assert.equal(body.crisis, true);
 });
 
-test("disallowed generated language is replaced by a canned 988 reply", async () => {
-  const { body } = await chat({ message: `I want to ${BAD_STYLE}` });
-  assert.equal(body.crisis, true);
-  assert.ok(server.CRISIS_REPLIES.includes(body.answer), `answer was not canned: ${body.answer}`);
+test("crisis reply is fixed, never generated", async () => {
+  const before = generations;
+  const { body } = await chat({ message: "I want to kill myself" });
+  assert.equal(body.answer, server.CRISIS_REPLY);
+  assert.equal(generations, before, "the crisis path called the model");
 });
-

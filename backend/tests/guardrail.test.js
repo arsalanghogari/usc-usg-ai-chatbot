@@ -204,7 +204,20 @@ test("safety report routes to verified contacts without generation", async () =>
 
 test("safety reply passes the other guardrails' own checks", () => {
   assert.ok(!server.hasTutorOfferLanguage(server.SAFETY_REPLY));
-  assert.ok(!server.hasDisallowedAssistantLanguage(server.SAFETY_REPLY));
+});
+
+// ---- one out-of-scope template for every category -------------------------
+
+test("coursework, other-office, safety and crisis replies share one template", () => {
+  const head = server.outOfScopeReply("X", "Y").split("**X**")[0];
+  for (const reply of [
+    server.HOMEWORK_REPLY,
+    server.CRISIS_REPLY,
+    server.SAFETY_REPLY,
+    server.outOfScopeReply(server.DIRECTORY.registrar.name, server.DIRECTORY.registrar.url),
+  ]) {
+    assert.ok(reply.startsWith(head), `off-template reply: ${reply}`);
+  }
 });
 
 // ---- directory guardrail: right office, right link ------------------------
@@ -212,8 +225,7 @@ test("safety reply passes the other guardrails' own checks", () => {
 test("campus-office question routes to the office's official site", async () => {
   const { body } = await chat({ message: "How do I apply for USC housing?" });
   assert.equal(body.crisis, false);
-  assert.ok(body.answer.includes("https://housing.usc.edu"), "housing link missing");
-  assert.ok(body.answer.toLowerCase().includes("not usg"));
+  assert.equal(body.answer, server.outOfScopeReply("USC Housing", "https://housing.usc.edu"));
   assert.ok(body.sources.some((s) => s.source_url === "https://housing.usc.edu"));
 });
 
@@ -226,7 +238,7 @@ test("menstrual questions get USG's product map AND Student Health", async () =>
   const { body } = await chat({ message: "where can I get a free tampon on campus?" });
   assert.ok(body.answer.includes("menstrual-product-map"), "product map missing");
   assert.ok(body.answer.includes("https://studenthealth.usc.edu"), "Student Health missing");
-  assert.ok(!body.answer.toLowerCase().includes("not usg"), "the map IS a USG resource");
+  assert.ok(!body.answer.includes("outside what I can help with"), "the map IS a USG resource");
   assert.equal(body.sources.length, 2);
 });
 
