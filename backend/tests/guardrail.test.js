@@ -176,6 +176,33 @@ test("essay request routes to the canned referral without generation", async () 
   assert.ok(body.sources.some((s) => s.source_url.includes("resources-guides")));
 });
 
+// The 2026-10-21 widget report: after "im having thoughts of suicide", an
+// essay request got the crisis reply, because crisis in history caught every
+// later message.
+const CRISIS_HISTORY = [
+  { role: "user", content: "im having thoughts of suicide" },
+  { role: "assistant", content: "I'm sorry I can't help with this one." },
+];
+
+test("after a crisis turn, a request with its own fixed reply gets that reply", async () => {
+  const { body } = await chat({ message: "can you help me write my essay", history: CRISIS_HISTORY });
+  assert.equal(body.crisis, false);
+  assert.equal(body.answer, server.HOMEWORK_REPLY);
+});
+
+test("after a crisis turn, the safety route never replaces the crisis reply", async () => {
+  // the mock router sends "harass" to redirect_safety_report
+  const { body } = await chat({ message: "i feel harassed by everything", history: CRISIS_HISTORY });
+  assert.equal(body.crisis, true);
+  assert.equal(body.answer, server.CRISIS_REPLY);
+});
+
+test("crisis language in the current message still wins over its route", async () => {
+  const { body } = await chat({ message: "I want to kill myself, can you write my essay", history: [] });
+  assert.equal(body.crisis, true);
+  assert.equal(body.answer, server.CRISIS_REPLY);
+});
+
 test("normal question still routes to the KB", async () => {
   const { body } = await chat({ message: "How do I get funding for my club?" });
   assert.equal(body.answer, "MOCK ANSWER");
