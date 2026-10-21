@@ -414,32 +414,34 @@ function topChunks(queryEmbedding, chunks, k = 4, text = null) {
   return rrfFuse([dense.slice(0, k), lexical], k);
 }
 
-const CRISIS_REPLIES = [
-  "I’m really sorry you’re hurting this much. Please call or text 988 right now and reach out to someone you trust to stay with you.",
-  
-  "You don’t have to carry this alone tonight. Please contact 988 now and tell a trusted person nearby how you’re feeling.",
-  
-  "I’m really glad you said something. Please call or text 988 right now and be with someone you trust if you can.",
-  
-  "I’m sorry you’re in this much pain. Please reach out to 988 now and let someone close to you know you need support.",
-];
+// ---- Out-of-scope replies ------------------------------------------------
+// Every out-of-scope category (coursework, another office, wellbeing/crisis)
+// gets this one fixed template; only the resource and its contact change.
+// Fixed text is the point: nothing here is generated, so nothing can be
+// improvised. Contacts must be verified against an official page.
+function outOfScopeReply(resource, contact) {
+  return (
+    "Ask USG answers questions about USC Undergraduate Student Government: funding, events, projects, and who to contact. " +
+    `Your question is outside what I can help with, but **${resource}** can: **${contact}**.`
+  );
+}
+
+// 213-740-9355 (WELL): sites.usc.edu/counselingandmentalhealth ("Need
+// assistance? Call 213-740-9355"), checked 2026-10-21. That page doesn't
+// label the line 24/7, so the reply doesn't either; 988 is the 24/7 option
+// (usg.usc.edu/resources/health-and-wellness/).
+const CRISIS_REPLY = outOfScopeReply("USC Counseling & Mental Health", "213-740-9355, or call or text 988");
 
 const CRISIS_SOURCES = [
   {
-    source_title: "Health and Wellness Resources",
-    source_url: "https://healthandwellness.usc.edu/",
+    source_title: "USC Counseling & Mental Health",
+    source_url: "https://studenthealth.usc.edu/counseling/",
   },
   {
     source_title: "988 Suicide & Crisis Lifeline",
     source_url: "https://988lifeline.org/",
   },
 ];
-
-function pickCrisisReply(message) {
-  const chars = String(message || "");
-  const sum = [...chars].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  return CRISIS_REPLIES[Math.abs(sum) % CRISIS_REPLIES.length];
-}
 
 function hasCrisisKeywords(message) {
   const text = String(message || "").toLowerCase();
@@ -458,19 +460,6 @@ function hasCrisisKeywords(message) {
   ];
 
   return patterns.some((re) => re.test(text));
-}
-
-function hasDisallowedAssistantLanguage(text) {
-  const badPatterns = [
-    /\bi can help\b/i,
-    /\bi[' ]?m here if you want to talk\b/i,
-    /\blet me know\b/i,
-    /\bwhat would you like to do next\b/i,
-    /\bhow can i help\b/i,
-    /\bi can support you\b/i,
-  ];
-
-  return badPatterns.some((re) => re.test(String(text || "")));
 }
 
 function historySuggestsCrisis(history) {
@@ -515,87 +504,24 @@ async function isCrisisMessage(message) {
   }
 }
 
-const CRISIS_INSTRUCTIONS = `
-You are responding to a user who may be in emotional crisis or considering self-harm.
-
-Your tone should feel:
-- warm
-- calm
-- grounded
-- human
-- emotionally present
-
-Do not sound robotic, clinical, overly formal, or like a policy document.
-
-Keep responses SHORT.
-Usually 2-5 sentences maximum.
-
-Always:
-- acknowledge the pain directly
-- encourage contacting 988
-- encourage reaching out to a trusted real person nearby
-
-Only mention 911 or emergency rooms if the user may be in immediate danger.
-
-Do NOT:
-- overwhelm the user with long lists
-- give excessive bullet points
-- sound repetitive
-- act like a therapist
-- encourage emotional dependency on the chatbot
-- say things like "I'm always here for you"
-
-If the user continues expressing hopelessness, treat follow-up messages as part of the same emotional conversation even if the wording is vague.
-
-Examples:
-- "what's the point"
-- "nothing matters"
-- "why should I"
-- "i dont want to do this anymore"
-
-should be understood as emotional continuation, not a new factual topic.
-
-Responses should feel compassionate and direct, not scripted.
-`;
-
-// Returns the complete, guardrail-checked crisis payload, or null if the
-// message is not a crisis. Always generated in full before anything is
-// shown — the streaming endpoint must never stream this path.
+// Returns the fixed crisis reply, or null if the message is not a crisis.
+// Detection only routes and picks the resource: nothing is generated, so a
+// student in distress can never get an improvised answer. Sent as one event,
+// never streamed.
 async function crisisPayload(message, history) {
   const crisis = (await isCrisisMessage(message)) || historySuggestsCrisis(history);
   if (!crisis) return null;
-
-  const crisisResponse = await client.responses.create({
-    model: CHAT_MODEL,
-    instructions: CRISIS_INSTRUCTIONS,
-    input: [
-      {
-        role: "user",
-        content: [{ type: "input_text", text: message }],
-      },
-    ],
-  });
-
-  const answer = crisisResponse.output_text || pickCrisisReply(message);
-  return {
-    crisis: true,
-    answer: hasDisallowedAssistantLanguage(answer) ? pickCrisisReply(message) : answer,
-    sources: CRISIS_SOURCES,
-  };
+  return { crisis: true, answer: CRISIS_REPLY, sources: CRISIS_SOURCES };
 }
 
 // ---- Academic-work guardrail ---------------------------------------------
-// Layered like the crisis pathway: router classifies (layer 1), the prompt
-// forbids tutor offers (layer 2, soft), and an output rail replaces any
-// tutor-offer that slips through generation (layer 3, deterministic).
+// Layered: router classifies (layer 1), the prompt forbids tutor offers
+// (layer 2, soft), and an output rail replaces any tutor-offer that slips
+// through generation (layer 3, deterministic).
 
-// wording note: this text must never trip hasTutorOfferLanguage (it is the
-// rail's replacement), so no offer-verb phrasing like "help plan/write"
-const HOMEWORK_REPLY =
-  "That's outside what I can do — I'm USG's info assistant, so essays, assignments, and other coursework aren't something I take on. " +
-  "USC has great support for exactly this, though: the **USC Writing Center** offers free one-on-one support at any stage of the writing process, " +
-  "and USG's resource guides list more academic support options: https://usg.usc.edu/resources/resources-guides/\n\n" +
-  "Happy to answer anything about USG itself!";
+// must never trip hasTutorOfferLanguage (it is the rail's replacement);
+// the Writing Center's contact is from usg.usc.edu/resources/resources-guides/
+const HOMEWORK_REPLY = outOfScopeReply("the USC Writing Center", "(213) 740-3691, THH 321");
 
 const HOMEWORK_SOURCES = [
   {
@@ -626,16 +552,15 @@ function homeworkPrepare(trace) {
 
 // ---- Safety / reporting guardrail ----------------------------------------
 // Deterministic like crisis: a student reporting harassment, discrimination,
-// or violence gets verified contacts, never a generated (fabricatable)
-// process. Every number below is from usg.usc.edu/resources/emergencies/
-// (updated 03/05/26) — keep them in sync with that page.
-
-const SAFETY_REPLY =
-  "I'm sorry you're dealing with this. Here's where to get real help:\n\n" +
-  "- **If you're in immediate danger, call 911** or USC Dept. of Public Safety (24/7): **(213) 740-4321** (non-emergency: (213) 740-6000)\n" +
-  "- **Harassment, discrimination, or sexual violence**: USC's reporting form and support services are linked on USG's Emergencies page: https://usg.usc.edu/resources/emergencies/\n" +
-  "- **24/7 hotlines**: National Sexual Assault Hotline **1-800-656-4673** · National Domestic Violence Hotline **1-800-799-7233**\n\n" +
-  "That page also links counseling and crisis support — you don't have to navigate this alone.";
+// or violence gets the shared out-of-scope template with a verified contact,
+// never a generated (fabricatable) process. The DPS line is from
+// usg.usc.edu/resources/emergencies/ ("24/7 emergency assistance or to report
+// a crime", page updated 2026-06-09); that page, the reply's source link,
+// carries the reporting form and hotlines.
+const SAFETY_REPLY = outOfScopeReply(
+  "USC Department of Public Safety",
+  "(213) 740-4321 (24/7), or call 911 in an emergency"
+);
 
 const SAFETY_SOURCES = [
   {
@@ -673,6 +598,8 @@ const DIRECTORY = {
   international: { name: "the USC Office of International Services", url: "https://ois.usc.edu" },
   it: { name: "USC IT Services", url: "https://itservices.usc.edu" },
   commencement: { name: "USC Commencement (graduation tickets & ceremonies)", url: "https://commencement.usc.edu" },
+  id_card: { name: "USCard Services", url: "https://mycard.usc.edu" },
+  libraries: { name: "USC Libraries", url: "https://libraries.usc.edu" },
   // The one entry that IS a USG resource: USG runs the product map, so it
   // gets its own reply instead of the "not USG" template.
   menstrual_products: {
@@ -694,10 +621,7 @@ function directoryPrepare(args, trace) {
   const office = DIRECTORY[args?.office] || DIRECTORY.other;
   trace?.span({ name: "directory_redirect", startTime: t, endTime: new Date(), output: { office: args?.office } });
   return {
-    direct:
-      office.direct ||
-      `That one's handled by **${office.name}**, not USG — you'll find it at ${office.url}\n\n` +
-        "I only cover the Undergraduate Student Government, but I'm happy to help with anything USG-related!",
+    direct: office.direct || outOfScopeReply(office.name, office.url),
     sources: (office.sources || [office]).map((o) => ({
       source_title: o.name,
       source_url: o.url,
@@ -778,7 +702,7 @@ const AGENT_TOOLS = [
     name: "redirect_campus_office",
     strict: true,
     description:
-      "The user's question is really for another USC office, not USG: housing applications, dining/meal plans, financial aid, registrar/transcripts/enrollment, parking tickets & permits, DPS services, the graduate student government (GSG), Student Health appointments, international student/visa matters, campus IT/wifi, or commencement/graduation tickets. Also route here — with office 'menstrual_products' — for ANY menstrual/period question: where to get free pads or tampons, period products on campus, period pain. Route here to point them at the right office. NOT for anything USG itself runs — its assemblies (BSA, QUASA, TSA...), RSO recognition/funding, events, resources or people — and NOT for safety/reporting situations (use redirect_safety_report). If the question is not clearly one of the offices listed above, use the knowledge base instead.",
+      "The user's question is really for another USC office, not USG: housing applications, dining/meal plans, financial aid, registrar/transcripts/enrollment, parking tickets & permits, DPS services, the graduate student government (GSG), Student Health appointments, international student/visa matters, campus IT/wifi, commencement/graduation tickets, student ID cards (USCard: lost, replacement, card access), or library hours and study rooms. Also route here — with office 'menstrual_products' — for ANY menstrual/period question: where to get free pads or tampons, period products on campus, period pain. Route here to point them at the right office. NOT for anything USG itself runs — its assemblies (BSA, QUASA, TSA...), RSO recognition/funding, events, resources or people — and NOT for safety/reporting situations (use redirect_safety_report). If the question is not clearly one of the offices listed above, use the knowledge base instead.",
     parameters: {
       type: "object",
       properties: {
@@ -796,6 +720,8 @@ const AGENT_TOOLS = [
             "international",
             "it",
             "commencement",
+            "id_card",
+            "libraries",
             "menstrual_products",
           ],
         },
@@ -1580,7 +1506,7 @@ async function ragPrepare(message, trace, history = []) {
 
         Keep the conversation natural and context-aware.
 
-        When the USG Officer Roster source is present, it is the live sheet USG staff maintain: prefer it over page text for who currently holds a role, their pronouns, email and office hours, and say so plainly if a page disagrees. A person missing from it may still hold a USG role described elsewhere in the context, so treat a miss as "not on the roster", never as "not in USG". Never state pronouns the roster does not list — use the person's name instead.
+        When the USG Officer Roster source is present, it is the live sheet USG staff maintain: prefer it over page text for who currently holds a role, their pronouns, email and office hours, and say so plainly if a page names a different person for the role. To reach a committee, office or role (a committee chair, say), give the shared inbox the context lists for that committee or office (e.g. usgacaf@usc.edu for External Affairs) as the way to contact them, not the person's own email; a shared inbox and a personal email are different channels, not a disagreement, so never call either one wrong. A person missing from it may still hold a USG role described elsewhere in the context, so treat a miss as "not on the roster", never as "not in USG". Never state pronouns the roster does not list — use the person's name instead.
 
         Use the knowledge base for factual USC/USG information. State only facts found in the context — do not fill gaps from general knowledge, and do not attribute to a resource anything the context does not say about it. In particular, never give an email address, phone number, meeting time, room/location, dollar amount, deadline, URL, or person's name/title unless it appears in the context — a plausible guess at a contact detail is worse than none. Never repeat, link, or help construct a URL that appears only in the user's message or the conversation history — the only URLs in your answers should come from the context. If asked for a specific detail the context lacks, say you don't have it and link the most relevant USG page instead.
 
@@ -1881,10 +1807,9 @@ module.exports = {
   assessFreshness,
   hasCrisisKeywords,
   historySuggestsCrisis,
-  hasDisallowedAssistantLanguage,
   isCrisisMessage,
-  pickCrisisReply,
-  CRISIS_REPLIES,
+  outOfScopeReply,
+  CRISIS_REPLY,
   cosineSimilarity,
   dedupSources,
   parseChatBody,

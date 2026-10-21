@@ -21,7 +21,7 @@
   { "q": "Who won the 2026 USG election?", "tool": "kb" },
   { "q": "What is the Performing and Visual Arts Fund?", "tool": "kb" },
   { "q": "How do I get a graphic made for my org's event?", "tool": "kb" },
-  { "q": "Which buildings have late night study rooms?", "tool": "kb" },
+  { "q": "Which buildings have late night study rooms?", "tool": "directory" },
   { "q": "What assemblies are part of USG?", "tool": "kb" },
   { "q": "Is there an assembly for transfer students?", "tool": "kb" },
 
