@@ -1291,12 +1291,29 @@ function officerLines(people) {
 }
 
 // The roster text to pin into context, or null when nothing matched.
-async function officerContext(message, trace) {
+// "whats her email" names nobody: the person is in an earlier turn. Only
+// pronoun follow-ups look back, so a topic change doesn't drag old names in.
+const FOLLOWUP_PRONOUN = /\b(she|her|hers|he|him|his|they|them|their|theirs)\b/i;
+
+function matchOfficersInTurn(message, history, roster) {
+  const people = matchOfficers(message, roster);
+  if (people.length || !FOLLOWUP_PRONOUN.test(message)) return people;
+  // the asker's own last question first, then the bot's last answer
+  // (for "who is eechang" -> "the closest match is Emily Chang")
+  for (const role of ["user", "assistant"]) {
+    const prev = history.findLast((m) => m.role === role);
+    const found = prev ? matchOfficers(prev.content, roster) : [];
+    if (found.length) return found;
+  }
+  return [];
+}
+
+async function officerContext(message, trace, history = []) {
   const t = new Date();
   let people = [];
   try {
     const roster = await loadRoster();
-    people = matchOfficers(message, roster);
+    people = matchOfficersInTurn(message, history, roster);
     // "what are office hours?" names nobody. 115 people have hours; the ones
     // a student means are the officers with a public office.
     if (!people.length && /office hours?/i.test(message)) {
@@ -1402,7 +1419,7 @@ const agentGraph = new StateGraph(AgentState)
   .addNode("router", async (s) => ({
     // property order matters: start the speculative KB prep, THEN await
     // the router
-    ragPromise: ragPrepare(s.message, s.trace).catch((e) => e),
+    ragPromise: ragPrepare(s.message, s.trace, s.history).catch((e) => e),
     route: await routeTool(s.message, s.history, s.trace),
   }))
   .addNode("kb", async (s) => {
@@ -1477,7 +1494,7 @@ function retrievalQuery(message) {
 
 // Shared RAG prep: embed -> retrieve -> rerank -> prompt + deduped sources.
 // Throws err with .status when the KB is empty.
-async function ragPrepare(message, trace) {
+async function ragPrepare(message, trace, history = []) {
   let t = new Date();
   const query = retrievalQuery(message);
   const queryEmbedding = await embed(query);
@@ -1535,7 +1552,7 @@ async function ragPrepare(message, trace) {
   });
 
   const today = new Date().toISOString().slice(0, 10);
-  const officers = await officerContext(message, trace);
+  const officers = await officerContext(message, trace, history);
   const parts = matches.map(
     (chunk, idx) =>
       `[${idx + 1}] ${chunk.source_title}` +
@@ -1625,7 +1642,8 @@ app.get("/health/db", async (_req, res) => {
     );
     res.json({ pool: true, host_prefix: host.slice(0, 12), ...rows[0] });
   } catch (e) {
-    res.json({ pool: true, error: e.message });
+    // 503, not 200: the keepalive workflow's curl -f must fail on this
+    res.status(503).json({ pool: true, error: e.message });
   }
 });
 
@@ -1881,6 +1899,7 @@ module.exports = {
   mergeRoster,
   discoverRosterTabs,
   matchOfficers,
+  matchOfficersInTurn,
   officerContext,
   loadRoster,
   officerLines,
@@ -1893,4 +1912,6 @@ module.exports = {
   AGENT_TOOLS,
   agentGraph,
   pool,
+  ragPrepare,
+  REASONING_EFFORT,
 };

@@ -193,6 +193,38 @@ test("matchOfficers handles typos and nicknames, and stays quiet otherwise", () 
   assert.deepEqual(names("how do I apply for funding"), []);
 });
 
+// The 2026-09-24 trace: "whats her email and pronouns" after "who is eechang"
+// pinned no roster entry, so the bot said it had neither.
+test("matchOfficersInTurn resolves pronoun follow-ups from the previous turn", () => {
+  const { matchOfficersInTurn } = require("../server.js");
+  const p = (name) => ({ name, titles: [], departments: [], hours: "", email: "", pronouns: "", other: "" });
+  const roster = [p("Shaleez Razavi"), p("Emily Chang"), p("Sammy Lee")];
+  const names = (q, history) => matchOfficersInTurn(q, history, roster).map((x) => x.name);
+
+  assert.deepEqual(
+    names("are you sure those are her pronouns?", [
+      { role: "user", content: "who is shaleez razavi" },
+      { role: "assistant", content: "Shaleez Razavi is the Deputy Aide to Sammy Lee." },
+    ]),
+    ["Shaleez Razavi"],
+    "the asker's last question wins over names in the bot's answer"
+  );
+  assert.deepEqual(
+    names("whats her email and pronouns", [
+      { role: "user", content: "who is eechang" },
+      { role: "assistant", content: "The closest match is Emily Chang, a Senior Advisor." },
+    ]),
+    ["Emily Chang"],
+    "falls back to the bot's answer when the question named no one"
+  );
+  assert.deepEqual(
+    names("how do I apply for funding", [{ role: "user", content: "who is shaleez razavi" }]),
+    [],
+    "no pronoun, no lookback"
+  );
+  assert.deepEqual(names("who is sammy lee", [{ role: "user", content: "who is shaleez razavi" }]), ["Sammy Lee"]);
+});
+
 // The August failure this exists to prevent: a bare name is nearly meaningless
 // to an embedding, so dense retrieval ranked prose above the roster page that
 // actually lists the person and the bot said they weren't in USG at all.

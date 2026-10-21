@@ -46,13 +46,6 @@ async function judgeFaithfulness(question, answer, context) {
 
 async function main() {
   const results = [];
-  let httpBase = null;
-  let httpServer = null;
-
-  if (JUDGE) {
-    httpServer = server.app.listen(0);
-    httpBase = `http://localhost:${httpServer.address().port}`;
-  }
 
   for (const item of golden) {
     const expected = Array.isArray(item.expected) ? item.expected : [item.expected];
@@ -66,25 +59,18 @@ async function main() {
     const r = { q: item.q, hit: rank > 0, rank, top: urls[0] };
 
     if (JUDGE) {
-      const resp = await fetch(`${httpBase}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: item.q }),
+      // Generate from the server's own prep and judge against that exact
+      // context. Rebuilding it here missed sibling chunks and the live roster,
+      // so correct answers got flagged as unsupported (0.50 on 2026-10-20).
+      const prep = await server.ragPrepare(item.q);
+      const resp = await client.responses.create({
+        model: CHAT_MODEL,
+        instructions: prep.instructions,
+        input: [{ role: "user", content: prep.userContent }],
+        reasoning: { effort: server.REASONING_EFFORT },
       });
-      const js = await resp.json();
-      // judge the model's own words, not the deterministic staleness notice
-      const bare = (js.answer || "").split("\n\n---\n⚠️")[0];
-      // mirror the server's prompt context exactly (incl. date headers),
-      // otherwise the judge flags legitimate "page last updated" citations
-      const context = matches
-        .map(
-          (m, i) =>
-            `[${i + 1}] ${m.source_title}` +
-            (m.source_modified ? ` (page last updated: ${m.source_modified.slice(0, 10)})` : "") +
-            `\n${m.source_url}\n${m.text}`
-        )
-        .join("\n\n");
-      const verdict = await judgeFaithfulness(item.q, bare, context);
+      const context = prep.userContent.split("</context>")[0].replace("<context>\n", "");
+      const verdict = await judgeFaithfulness(item.q, resp.output_text || "", context);
       r.faithful = verdict.faithful;
       r.judge_reason = verdict.reason;
     }
@@ -123,7 +109,6 @@ async function main() {
 
   fs.appendFileSync(path.join(__dirname, "history.jsonl"), JSON.stringify(summary) + "\n");
 
-  if (httpServer) httpServer.close();
   await server.pool?.end();
 }
 

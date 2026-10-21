@@ -55,6 +55,11 @@ create materialized view if not exists term_df as
   -- inside create/refresh materialized view.
   select word, ndoc from ts_stat('select tsv from public.chunks');
 create unique index if not exists term_df_word on term_df (word);
+-- Supabase exposes the public schema over its REST API to the anon key. The
+-- backend and this script connect as postgres (bypasses RLS), so RLS with no
+-- policies closes the API path without touching them. Views can't take RLS.
+alter table chunks enable row level security;
+revoke all on term_df from anon, authenticated;
 """
 
 UPSERT_SQL = """
