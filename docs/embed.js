@@ -16,7 +16,7 @@
   }
   var widgetOrigin = new URL(widgetUrl, location.href).origin;
 
-  var CLOSED = { width: "96px", height: "96px" };
+  var CLOSED = { width: "136px", height: "136px" }; // 84px launcher + 24px inset + shadow
   var OPEN = { width: "min(470px, 100vw)", height: "min(760px, 100vh)" };
 
   var iframe = document.createElement("iframe");

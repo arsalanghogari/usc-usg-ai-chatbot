@@ -80,8 +80,8 @@
       position: fixed;
       right: 24px;
       bottom: 24px;
-      width: 64px;
-      height: 64px;
+      width: 84px;
+      height: 84px;
       border: none;
       border-radius: 50%;
       background: none;
@@ -432,8 +432,8 @@
       .chat-launcher {
         right: 16px;
         bottom: 16px;
-        width: 58px;
-        height: 58px;
+        width: 72px;
+        height: 72px;
       }
     }
 
@@ -449,8 +449,8 @@
 
     /* chat-scale avatar in the header, full-size in the launcher */
     .chat-header .avatar-wrap {
-      width: 44px;
-      height: 44px;
+      width: 60px;
+      height: 60px;
       flex-shrink: 0;
       background: #2b2b2b;
       border: 2px solid var(--gold);
@@ -572,11 +572,22 @@
     const send = document.getElementById("send");
     const statusEl = document.getElementById("status");
 
-    // George opens his mouth while an answer streams in, closes it when done
+    // George's mouth flaps while an answer streams in and shuts when done.
+    // Reduced-motion users get a still open mouth instead of the flapping.
     const headerAvatar = document.getElementById("headerAvatar");
     new Image().src = "george-talking.png"; // preload: no blank frame on first swap
+    const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+    let flap = null;
     const setTalking = (on) => {
-      headerAvatar.src = on ? "george-talking.png" : "george.png";
+      clearInterval(flap);
+      let open = on;
+      headerAvatar.src = open ? "george-talking.png" : "george.png";
+      if (on && !reduceMotion.matches) {
+        flap = setInterval(() => {
+          open = !open;
+          headerAvatar.src = open ? "george-talking.png" : "george.png";
+        }, 160);
+      }
     };
     const history = [];
 
@@ -703,7 +714,6 @@
 
         // swap the "..." bubble for a live one we append tokens into
         thinking.remove();
-        setTalking(true);
         const wrap = document.createElement("div");
         wrap.className = "msg bot";
         const bubble = document.createElement("div");
@@ -734,6 +744,9 @@
             if (!part.startsWith("data: ")) continue;
             const ev = JSON.parse(part.slice(6));
             if (ev.delta) {
+              // talk from the first streamed word, not from when the
+              // connection opens: retrieval can take seconds before that
+              if (!full) setTalking(true);
               full += ev.delta;
               render();
             } else if (ev.crisis) {
@@ -746,6 +759,7 @@
               finalSources = ev.sources || finalSources;
               render();
             } else if (ev.done) {
+              setTalking(false); // last word is in; don't wait for the rest of the loop
               full += ev.notice || "";
               finalSources = ev.sources || finalSources;
               finalTraceId = ev.traceId || null;
