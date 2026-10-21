@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />  <!-- Mobile-friendly meta tag -->
   <title>Ask USG — USC Undergraduate Student Government</title>
   <link rel="icon" type="image/png" href="favicon.png" />
-  <link rel="apple-touch-icon" href="george.jpg" />
+  <link rel="apple-touch-icon" href="george.png" />
   <style>
     /* Reusable theme values with var(--name) */
     /* All colors from the 2026 USG Brand Guidelines palette (p.5).
@@ -94,6 +94,7 @@
       z-index: 1000;
       transition: transform 0.18s ease, box-shadow 0.18s ease;
       background: #2b2b2b; /* tire-colored: any rim gap reads as tire, not white */
+      padding: 0; /* the browser's default button padding left a ring around George */
       border: 3px solid var(--cardinal);
       border-radius: 50%;
       overflow: hidden;
@@ -460,9 +461,12 @@
       height: 100%;
       object-fit: contain;
       display: block;
+      /* the image rounds itself: Safari skips the parent's rounded
+         overflow clip for a child with a filter, and showed the square
+         image's corners */
+      border-radius: 50%;
 
       filter: contrast(1.15) saturate(1.25) brightness(1.05);
-      transform: scale(1.08);
     }
 
     /* --- Embed modes ---------------------------------------------------
@@ -511,7 +515,7 @@
 <body>
   <button class="chat-launcher" id="launcher" aria-label="Open USG chat">
     <div class="avatar-wrap">
-      <img src="george.jpg" alt="George Tirebiter, the USG chat avatar" class="avatar-img" />
+      <img src="george.png" alt="George Tirebiter, the USG chat avatar" class="avatar-img" />
     </div>
   </button>
 
@@ -520,7 +524,7 @@
       <div class="chat-header">
         <div class="chat-header-left">
           <div class="avatar-wrap">
-            <img src="george.jpg" alt="George Tirebiter, the USG chat avatar" class="avatar-img" id="headerAvatar" />
+            <img src="george.png" alt="George Tirebiter, the USG chat avatar" class="avatar-img" id="headerAvatar" />
           </div>
           <div class="chat-title-wrap">
             <h1 class="chat-title" id="chatTitle">Ask USG<span class="beta-pill">BETA</span></h1>
@@ -570,9 +574,9 @@
 
     // George opens his mouth while an answer streams in, closes it when done
     const headerAvatar = document.getElementById("headerAvatar");
-    new Image().src = "george-talking.jpg"; // preload: no blank frame on first swap
+    new Image().src = "george-talking.png"; // preload: no blank frame on first swap
     const setTalking = (on) => {
-      headerAvatar.src = on ? "george-talking.jpg" : "george.jpg";
+      headerAvatar.src = on ? "george-talking.png" : "george.png";
     };
     const history = [];
 
