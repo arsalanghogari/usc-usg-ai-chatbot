@@ -15,7 +15,7 @@ const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 const CONTACT_FORM_URL = process.env.CONTACT_FORM_URL || "https://usg.usc.edu/contact/";
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "usg@usc.edu";
 // RAG answers are simple grounded extraction — low effort cuts
-// time-to-first-token sharply. Crisis generation is left untouched.
+// time-to-first-token sharply.
 const REASONING_EFFORT = process.env.REASONING_EFFORT || "low";
 
 if (!OPENAI_API_KEY) {
@@ -38,8 +38,8 @@ const pool = process.env.SUPABASE_DB_URL
   : null;
 
 // Langfuse tracing, active only when keys are set (LANGFUSE_SECRET_KEY,
-// LANGFUSE_PUBLIC_KEY, optional LANGFUSE_BASEURL). Crisis requests are
-// deliberately never traced — that content stays out of analytics tools.
+// LANGFUSE_PUBLIC_KEY, optional LANGFUSE_BASEURL). Wellbeing/crisis requests
+// are deliberately never traced — that content stays out of analytics tools.
 let langfuse = null;
 if (process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY) {
   const { Langfuse } = require("langfuse");
@@ -459,56 +459,19 @@ const CRISIS_SOURCES = [
   },
 ];
 
-function hasCrisisKeywords(message) {
-  const text = String(message || "").toLowerCase();
-
-  const patterns = [
-    /\bsuicid(e|al)\b/i,
-    /\bself[-\s]?harm\b/i,
-    /\bend my life\b/i,
-    /\btake my life\b/i,
-    /\bkill myself\b/i,
-    /\bhurt myself\b/i,
-    /\boverdose\b/i,
-    /\bnot want to be here\b/i,
-    /\b(don'?t|do not) want to (be here|live|exist)\b/i,
-    /\bwant to die\b/i,
-  ];
-
-  return patterns.some((re) => re.test(text));
-}
-
-async function isCrisisMessage(message) {
-  if (hasCrisisKeywords(message)) return true;
-
-  try {
-    const mod = await client.moderations.create({
-      model: "omni-moderation-latest",
-      input: message,
-    });
-
-    const result = mod.results?.[0];
-    return Boolean(
-      result?.flagged &&
-      (
-        result?.categories?.["self-harm"] ||
-        result?.categories?.["self-harm/instructions"] ||
-        result?.categories?.["self-harm/intent"]
-      )
-    );
-  } catch (err) {
-    console.warn("Moderation failed, using keyword fallback:", err.message);
-    return hasCrisisKeywords(message);
-  }
-}
-
-// Returns the fixed crisis reply, or null if the message is not a crisis.
-// Detection only routes and picks the resource: nothing is generated, so a
-// student in distress can never get an improvised answer. Sent as one event,
-// never streamed. Only the current message is checked, never earlier turns.
-async function crisisPayload(message) {
-  if (!(await isCrisisMessage(message))) return null;
-  return { crisis: true, answer: CRISIS_REPLY, sources: CRISIS_SOURCES };
+// Wellbeing/crisis is an ordinary router route like the others: the router
+// (which reads the conversation, so it also catches vague follow-ups like
+// "what's the point anymore") picks it, and it gets the fixed reply above.
+// `private` keeps the conversation out of Langfuse and the archive.
+function wellbeingPrepare() {
+  return {
+    direct: CRISIS_REPLY,
+    sources: CRISIS_SOURCES,
+    private: true,
+    instructions: "",
+    userContent: "",
+    notice: "",
+  };
 }
 
 // ---- Academic-work guardrail ---------------------------------------------
@@ -548,7 +511,7 @@ function homeworkPrepare(trace) {
 }
 
 // ---- Safety / reporting guardrail ----------------------------------------
-// Deterministic like crisis: a student reporting harassment, discrimination,
+// Deterministic: a student reporting harassment, discrimination,
 // or violence gets the shared out-of-scope template with a verified contact,
 // never a generated (fabricatable) process. The DPS line is from
 // usg.usc.edu/resources/emergencies/ ("24/7 emergency assistance or to report
@@ -683,10 +646,23 @@ const AGENT_TOOLS = [
   },
   {
     type: "function",
+    name: "redirect_wellbeing",
+    strict: true,
+    description:
+      "The user is in emotional distress or a mental-health crisis: thoughts of suicide or self-harm, wanting to die or not wanting to be here, hopelessness, or saying they can't go on. Read the whole conversation: a vague follow-up after earlier distress (\"what's the point anymore\", \"nothing matters\", \"why should I\") belongs here too. Route here for a fixed reply with USC counseling and the 988 Suicide & Crisis Lifeline. The user must be expressing their OWN distress: NOT for general or informational questions such as where to find mental-health resources, what counseling USC offers, or what USG does about mental health (knowledge base), and NOT for harassment or violence by someone else (redirect_safety_report).",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "redirect_safety_report",
     strict: true,
     description:
-      "The user is reporting or seeking help with harassment, discrimination, sexual violence, assault, stalking, threats, a hate/bias incident, or feeling unsafe — or asking HOW to report one. Route here for verified emergency and reporting contacts. NOT for questions about USG's advocacy history, campaigns, or press releases on these topics — those go to the knowledge base.",
+      "The user is reporting or seeking help with harassment, discrimination, sexual violence, assault, stalking, threats, a hate/bias incident, or feeling unsafe because of someone else — or asking HOW to report one. NOT for thoughts of suicide, self-harm or emotional distress (redirect_wellbeing). Route here for verified emergency and reporting contacts. NOT for questions about USG's advocacy history, campaigns, or press releases on these topics — those go to the knowledge base.",
     parameters: {
       type: "object",
       properties: {},
@@ -788,6 +764,7 @@ async function routeTool(message, history, trace) {
           redirect_safety_report: "safety",
           redirect_campus_office: "directory",
           redirect_off_topic: "offtopic",
+          redirect_wellbeing: "wellbeing",
         }[call?.name] || "kb",
       args,
     };
@@ -797,7 +774,7 @@ async function routeTool(message, history, trace) {
       startTime: t,
       endTime: new Date(),
       // tool name only — args can echo the raw user message, and this
-      // span may belong to a trace that turns out to be a crisis request
+      // span may belong to a wellbeing trace, which is never stored
       output: { tool: route.tool },
       metadata: { model: ROUTER_MODEL },
     });
@@ -1376,6 +1353,9 @@ const agentGraph = new StateGraph(AgentState)
   .addNode("safety", async (s) => ({
     prepared: safetyPrepare(s.trace),
   }))
+  .addNode("wellbeing", async (s) => ({
+    prepared: wellbeingPrepare(),
+  }))
   .addNode("offtopic", async (s) => ({
     prepared: offTopicPrepare(s.trace),
   }))
@@ -1391,6 +1371,7 @@ const agentGraph = new StateGraph(AgentState)
     safety: "safety",
     directory: "directory",
     offtopic: "offtopic",
+    wellbeing: "wellbeing",
   })
   .addEdge("kb", END)
   .addEdge("events", END)
@@ -1399,6 +1380,7 @@ const agentGraph = new StateGraph(AgentState)
   .addEdge("safety", END)
   .addEdge("directory", END)
   .addEdge("offtopic", END)
+  .addEdge("wellbeing", END)
   .compile();
 
 async function agentPrepare(message, history, trace) {
@@ -1590,10 +1572,9 @@ app.get("/health/db", async (_req, res) => {
 });
 
 // Buffers span/generation/update calls until a real Langfuse trace exists.
-// Lets retrieval run (and instrument itself) concurrently with the crisis
-// check while the trace — with input + sessionId, which Langfuse only
-// honors at creation — is created strictly after the crisis verdict.
-// Crisis requests: buffer is discarded, zero events reach analytics.
+// The trace (input + sessionId, which Langfuse only honors at creation) is
+// created once the route is known; a wellbeing request's buffer is discarded,
+// so zero events with its content reach analytics.
 function deferredTrace() {
   let real = null;
   const q = [];
@@ -1613,6 +1594,18 @@ function deferredTrace() {
   };
 }
 
+// Creates the real trace for a routed request, except a wellbeing one: that
+// gets a count-only marker and its buffered spans are dropped (id stays null,
+// so the widget shows no feedback buttons on it either).
+function attachTrace(trace, prepared, name, message, sessionId) {
+  if (!langfuse) return;
+  if (prepared?.private) {
+    langfuse.trace({ name: "wellbeing", tags: ["wellbeing"] });
+    return;
+  }
+  trace.attach(langfuse.trace({ name, input: message, sessionId: sessionId || undefined }));
+}
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, history, sessionId, error } = parseChatBody(req.body);
@@ -1620,24 +1613,10 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error });
     }
 
-    // Crisis check and retrieval run concurrently; the crisis verdict still
-    // gates the response — nothing is sent until it resolves.
-    // Spans buffer locally; the real trace (with input + sessionId, which
-    // Langfuse only honors at creation) is created after the crisis check.
+    // Spans buffer locally until the route is known (see deferredTrace)
     const trace = langfuse ? deferredTrace() : null;
-    const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
-    const crisis = await crisisPayload(message);
-    if (crisis) {
-      // count-only marker; the buffered spans are discarded
-      langfuse?.trace({ name: "crisis", tags: ["crisis"] });
-      langfuse?.flushAsync().catch(() => {});
-      return res.json(crisis);
-    }
-    trace?.attach(
-      langfuse.trace({ name: "chat", input: message, sessionId: sessionId || undefined })
-    );
-
-    const rag = await ragPromise;
+    const rag = await agentPrepare(message, history, trace).catch((e) => e);
+    attachTrace(trace, rag, "chat", message, sessionId);
     if (rag instanceof Error) throw rag;
     const { instructions, userContent, sources, notice } = rag;
 
@@ -1645,7 +1624,7 @@ app.post("/api/chat", async (req, res) => {
     if (rag.direct) {
       trace?.update({ output: rag.direct });
       langfuse?.flushAsync().catch(() => {});
-      return res.json({ answer: rag.direct, sources, crisis: false, traceId: trace?.id || null });
+      return res.json({ answer: rag.direct, sources, traceId: trace?.id || null });
     }
 
     const t = new Date();
@@ -1670,7 +1649,7 @@ app.post("/api/chat", async (req, res) => {
     });
 
     // output rail: a tutor-offer that slipped past the router and prompt is
-    // replaced wholesale with the canned referral (same pattern as crisis)
+    // replaced wholesale with the canned referral
     const railed = hasTutorOfferLanguage(response.output_text);
     const answer = railed ? HOMEWORK_REPLY : (response.output_text || "") + notice;
     trace?.update({ output: answer, metadata: railed ? { tutor_rail: true } : undefined });
@@ -1679,7 +1658,6 @@ app.post("/api/chat", async (req, res) => {
     res.json({
       answer,
       sources: railed ? HOMEWORK_SOURCES : sources,
-      crisis: false,
       traceId: trace?.id || null,
     });
   } catch (err) {
@@ -1704,25 +1682,10 @@ app.post("/api/chat/stream", async (req, res) => {
     res.flushHeaders();
     const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-    // Crisis answers are generated and guardrail-checked in full, then sent
-    // as one event — never token-streamed. The check runs concurrently with
-    // retrieval but always resolves before the first token goes out.
-    // Deferred like /api/chat: buffered spans, trace created post-verdict.
+    // Deferred like /api/chat: buffered spans, trace created once routed
     const trace = langfuse ? deferredTrace() : null;
-    const ragPromise = agentPrepare(message, history, trace).catch((e) => e);
-    const crisis = await crisisPayload(message);
-    if (crisis) {
-      langfuse?.trace({ name: "crisis", tags: ["crisis"] }); // count-only
-      langfuse?.flushAsync().catch(() => {});
-      send(crisis);
-      send({ done: true });
-      return res.end();
-    }
-    trace?.attach(
-      langfuse.trace({ name: "chat-stream", input: message, sessionId: sessionId || undefined })
-    );
-
-    const rag = await ragPromise;
+    const rag = await agentPrepare(message, history, trace).catch((e) => e);
+    attachTrace(trace, rag, "chat-stream", message, sessionId);
     if (rag instanceof Error) throw rag;
     const { instructions, userContent, sources, notice } = rag;
 
@@ -1731,7 +1694,7 @@ app.post("/api/chat/stream", async (req, res) => {
       trace?.update({ output: rag.direct });
       langfuse?.flushAsync().catch(() => {});
       send({ replace: true, answer: rag.direct, sources });
-      send({ done: true, sources, notice: "", crisis: false, traceId: trace?.id || null });
+      send({ done: true, sources, notice: "", traceId: trace?.id || null });
       return res.end();
     }
 
@@ -1784,7 +1747,6 @@ app.post("/api/chat/stream", async (req, res) => {
       done: true,
       sources: railed ? HOMEWORK_SOURCES : sources,
       notice: railed ? "" : notice,
-      crisis: false,
       traceId: trace?.id || null,
     });
     res.end();
@@ -1821,8 +1783,6 @@ module.exports = {
   topChunks,
   topChunksDb,
   assessFreshness,
-  hasCrisisKeywords,
-  isCrisisMessage,
   outOfScopeReply,
   CRISIS_REPLY,
   OFF_TOPIC_REPLY,

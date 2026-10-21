@@ -112,7 +112,6 @@ test("sibling expansion puts non-retrieved chunks of a picked page into the prom
   captured.responses.length = 0;
   const { status, body } = await chat({ message: "How do I get funding?" });
   assert.equal(status, 200);
-  assert.equal(body.crisis, false);
   const gen = captured.responses.at(-1);
   const prompt = JSON.stringify(gen.input);
   // k=4 retrieval can only have picked old-blog + funding 0-2; chunks 3 and 4
