@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />  <!-- Mobile-friendly meta tag -->
   <title>Ask USG — USC Undergraduate Student Government</title>
   <link rel="icon" type="image/png" href="favicon.png" />
-  <link rel="apple-touch-icon" href="tommy.png" />
+  <link rel="apple-touch-icon" href="george.jpg" />
   <style>
     /* Reusable theme values with var(--name) */
     /* All colors from the 2026 USG Brand Guidelines palette (p.5).
@@ -93,7 +93,7 @@
       box-shadow: 0 12px 30px rgba(153, 0, 0, 0.35);
       z-index: 1000;
       transition: transform 0.18s ease, box-shadow 0.18s ease;
-      background: #ffffff;
+      background: #2b2b2b; /* tire-colored: any rim gap reads as tire, not white */
       border: 3px solid var(--cardinal);
       border-radius: 50%;
       overflow: hidden;
@@ -451,7 +451,7 @@
       width: 44px;
       height: 44px;
       flex-shrink: 0;
-      background: #ffffff;
+      background: #2b2b2b;
       border: 2px solid var(--gold);
     }
 
@@ -511,7 +511,7 @@
 <body>
   <button class="chat-launcher" id="launcher" aria-label="Open USG chat">
     <div class="avatar-wrap">
-      <img src="tommy.png" alt="Chat avatar" class="avatar-img" />
+      <img src="george.jpg" alt="George Tirebiter, the USG chat avatar" class="avatar-img" />
     </div>
   </button>
 
@@ -520,7 +520,7 @@
       <div class="chat-header">
         <div class="chat-header-left">
           <div class="avatar-wrap">
-            <img src="tommy.png" alt="Chat avatar" class="avatar-img" />
+            <img src="george.jpg" alt="George Tirebiter, the USG chat avatar" class="avatar-img" id="headerAvatar" />
           </div>
           <div class="chat-title-wrap">
             <h1 class="chat-title" id="chatTitle">Ask USG<span class="beta-pill">BETA</span></h1>
@@ -567,6 +567,13 @@
     const q = document.getElementById("q");
     const send = document.getElementById("send");
     const statusEl = document.getElementById("status");
+
+    // George opens his mouth while an answer streams in, closes it when done
+    const headerAvatar = document.getElementById("headerAvatar");
+    new Image().src = "george-talking.jpg"; // preload: no blank frame on first swap
+    const setTalking = (on) => {
+      headerAvatar.src = on ? "george-talking.jpg" : "george.jpg";
+    };
     const history = [];
 
     /*function escapeHtml(s) {
@@ -692,6 +699,7 @@
 
         // swap the "..." bubble for a live one we append tokens into
         thinking.remove();
+        setTalking(true);
         const wrap = document.createElement("div");
         wrap.className = "msg bot";
         const bubble = document.createElement("div");
@@ -838,6 +846,7 @@
         statusEl.textContent = e.message || "Error";
         console.error("Chat error", e);
       } finally {
+        setTalking(false);
         send.disabled = false;
       }
     }
