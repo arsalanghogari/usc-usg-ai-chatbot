@@ -275,7 +275,7 @@ test("off-topic question gets the fixed reply with no sources", async () => {
 
 test("campus-office question routes to the office's official site", async () => {
   const { body } = await chat({ message: "How do I apply for USC housing?" });
-  assert.equal(body.answer, server.outOfScopeReply("USC Housing", "https://housing.usc.edu"));
+  assert.equal(body.answer, server.outOfScopeReply("USC Housing", "[USC Housing website](https://housing.usc.edu)"));
   assert.ok(body.sources.some((s) => s.source_url === "https://housing.usc.edu"));
 });
 
