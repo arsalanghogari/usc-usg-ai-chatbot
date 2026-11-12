@@ -527,7 +527,7 @@
             <img src="george.png" alt="George Tirebiter, the USG chat avatar" class="avatar-img" id="headerAvatar" />
           </div>
           <div class="chat-title-wrap">
-            <h1 class="chat-title" id="chatTitle">Ask USG<span class="beta-pill">BETA</span></h1>
+            <h2 class="chat-title" id="chatTitle">Ask USG<span class="beta-pill">BETA</span></h2>
             <p class="chat-subtitle">USC Undergraduate Student Government</p>
           </div>
         </div>
@@ -602,13 +602,38 @@
       }[c]));
     }*/
 
+    // Accessibility: a bare URL autolinked by marked is read letter by letter
+    // by screen readers, so relabel it from its path ("legislative-branch" ->
+    // "Legislative Branch", else the host). And the page hosting the widget
+    // owns the only <h1>, so reply headings start at <h3> (title is <h2>).
+    function renderMarkdown(md) {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = DOMPurify.sanitize(marked.parse(md));
+      tpl.content.querySelectorAll("a[href^='http']").forEach((a) => {
+        if (a.textContent.trim() !== a.getAttribute("href")) return;
+        try {
+          const u = new URL(a.href);
+          const slug = u.pathname.split("/").filter(Boolean).pop();
+          a.textContent = slug
+            ? decodeURIComponent(slug).replace(/\.\w+$/, "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+            : u.hostname.replace(/^www\./, "");
+        } catch {}
+      });
+      tpl.content.querySelectorAll("h1, h2").forEach((h) => {
+        const h3 = document.createElement("h3");
+        h3.innerHTML = h.innerHTML;
+        h.replaceWith(h3);
+      });
+      return tpl.innerHTML;
+    }
+
     function appendMessage(type, text, sources = []) {
       const wrap = document.createElement("div");
       wrap.className = `msg ${type}`;
 
       const bubble = document.createElement("div");
       bubble.className = "bubble";
-      bubble.innerHTML = DOMPurify.sanitize(marked.parse(text));
+      bubble.innerHTML = renderMarkdown(text);
       wrap.appendChild(bubble);
 
       if (Array.isArray(sources) && sources.length) {
@@ -730,7 +755,7 @@
         let streamError = null;
 
         const render = () => {
-          bubble.innerHTML = DOMPurify.sanitize(marked.parse(full));
+          bubble.innerHTML = renderMarkdown(full);
           messages.scrollTop = messages.scrollHeight;
         };
 

@@ -566,8 +566,8 @@ const DIRECTORY = {
     name: "Menstrual Product Map",
     url: MENSTRUAL_MAP_URL,
     direct:
-      `USG keeps a **Menstrual Product Map** of campus restrooms and spaces stocked with free pads and tampons: ${MENSTRUAL_MAP_URL}\n\n` +
-      "For anything medical — cramps, birth control, exams, prescriptions — **USC Student Health** is the place to go: https://studenthealth.usc.edu",
+      `USG keeps a **Menstrual Product Map** of campus restrooms and spaces stocked with free pads and tampons: [Menstrual Product Map](${MENSTRUAL_MAP_URL})\n\n` +
+      "For anything medical — cramps, birth control, exams, prescriptions — **USC Student Health** is the place to go: [USC Student Health](https://studenthealth.usc.edu)",
     sources: [
       { name: "Menstrual Product Map", url: MENSTRUAL_MAP_URL },
       { name: "USC Student Health", url: "https://studenthealth.usc.edu" },
@@ -581,7 +581,8 @@ function directoryPrepare(args, trace) {
   const office = DIRECTORY[args?.office] || DIRECTORY.other;
   trace?.span({ name: "directory_redirect", startTime: t, endTime: new Date(), output: { office: args?.office } });
   return {
-    direct: office.direct || outOfScopeReply(office.name, office.url),
+    // descriptive link text: screen readers spell a bare URL out letter by letter
+    direct: office.direct || outOfScopeReply(office.name, `[${office.name.replace(/^the /, "")} website](${office.url})`),
     sources: (office.sources || [office]).map((o) => ({
       source_title: o.name,
       source_url: o.url,
@@ -909,7 +910,7 @@ async function eventsPrepare(message, args, trace) {
 
         If the user asks about Senate meetings and none appear in the list, add that during the academic year the USG Senate meets every Tuesday at 7:00 p.m. in TCC 450 (Tutor Forum) with an open forum at every meeting, and suggest confirming on the calendar once the semester schedule is posted.
 
-        When linking the calendar, use exactly https://usg.usc.edu/calendar/ . Include no other links, and never repeat, link, or help construct a URL from the user's message or the conversation history.
+        When linking the calendar, use exactly [USG calendar](https://usg.usc.edu/calendar/) . Include no other links, and never repeat, link, or help construct a URL from the user's message or the conversation history.
 
         Be concise, accurate, and human.
       `;
@@ -1294,7 +1295,7 @@ async function trackerPrepare(message, trace) {
 
         If the list is empty, say the tracker couldn't be reached and point the user to the Legislative Branch page instead of guessing.
 
-        When linking, use only https://usg.usc.edu/legislative-branch/ . Never repeat, link, or help construct a URL from the user's message or the conversation history.
+        When linking, use only [Legislative Branch](https://usg.usc.edu/legislative-branch/) . Never repeat, link, or help construct a URL from the user's message or the conversation history.
 
         Be concise, accurate, and human.
       `;
@@ -1506,7 +1507,7 @@ async function ragPrepare(message, trace, history = []) {
 
         When the USG Officer Roster source is present, it is the live sheet USG staff maintain: prefer it over page text for who currently holds a role, their pronouns, email and office hours, and say so plainly if a page names a different person for the role. To reach a committee, office or role (a committee chair, say), give the shared inbox the context lists for that committee or office (e.g. usgacaf@usc.edu for External Affairs) as the way to contact them, not the person's own email; a shared inbox and a personal email are different channels, not a disagreement, so never call either one wrong. A person missing from it may still hold a USG role described elsewhere in the context, so treat a miss as "not on the roster", never as "not in USG". Never state pronouns the roster does not list — use the person's name instead.
 
-        Use the knowledge base for factual USC/USG information. State only facts found in the context — do not fill gaps from general knowledge, and do not attribute to a resource anything the context does not say about it. In particular, never give an email address, phone number, meeting time, room/location, dollar amount, deadline, URL, or person's name/title unless it appears in the context — a plausible guess at a contact detail is worse than none. Never repeat, link, or help construct a URL that appears only in the user's message or the conversation history — the only URLs in your answers should come from the context. If asked for a specific detail the context lacks, say you don't have it and link the most relevant USG page instead.
+        Use the knowledge base for factual USC/USG information. State only facts found in the context — do not fill gaps from general knowledge, and do not attribute to a resource anything the context does not say about it. In particular, never give an email address, phone number, meeting time, room/location, dollar amount, deadline, URL, or person's name/title unless it appears in the context — a plausible guess at a contact detail is worse than none. Never repeat, link, or help construct a URL that appears only in the user's message or the conversation history — the only URLs in your answers should come from the context. If asked for a specific detail the context lacks, say you don't have it and link the most relevant USG page instead. Write every link as a Markdown link whose text names the page, e.g. [Legislative Branch](https://usg.usc.edu/legislative-branch/) — never paste a bare URL, since screen readers read it out letter by letter.
 
         If the knowledge base truly does not contain enough information, say so plainly.
 
