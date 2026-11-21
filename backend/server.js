@@ -257,6 +257,18 @@ app.use(
     legacyHeaders: false,
   })
 );
+// Volume cap on the model-calling routes only: a script at 20/min all day is
+// the real cost risk, and humans never get near 200 chats an hour. Feedback
+// stays on the per-minute bucket alone. In-memory, per instance, like above.
+app.use(
+  "/api/chat",
+  rateLimit({
+    windowMs: 60 * 60_000,
+    max: Number(process.env.RATE_LIMIT_PER_HOUR) || 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
 
 app.use(express.static(path.join(__dirname, "..", "docs")));
 
